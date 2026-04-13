@@ -45,30 +45,52 @@ npm run init-kb    # Creates ~/knowledge/ structure (run once)
 
 ### Connect the knowledge base to Claude Code
 
-This is what makes the project useful beyond a CLI — add the following to your **global** `~/.claude/CLAUDE.md` (create the file if it doesn't exist). This tells Claude Code to proactively search your knowledge base whenever you discuss professional topics, in any project, any session.
+This is what makes the project useful beyond a CLI. Two files wire the knowledge base into every Claude Code session:
+
+**1. `~/.claude/CLAUDE.md`** (global, create if it doesn't exist) — tells Claude the KB exists and when to reach for it:
 
 ```markdown
 # Personal Knowledge Base
 
-A personal knowledge base at `~/knowledge/` is maintained automatically by the
-[personal-wiki](https://github.com/YOUR_USERNAME/personal-wiki) pipeline (LinkedIn,
-Twitter, Apple Notes, web clips → Claude Haiku categorization → daily wiki synthesis).
-
-- `~/knowledge/wiki/`        — synthesized pages by topic, updated daily (start here)
-- `~/knowledge/raw/`         — source posts with URLs, append-only
-- `~/knowledge/synthesis.md` — cross-domain patterns, updated weekly
-
-**Search proactively** when the user discusses startups, AI, product, investing,
-leadership, marketing, career, mindset, or sales. Prefer `wiki/` for themes, `raw/`
-for specific quotes and original voice. Always cite the source URL (`**Link:**` field).
-Skip entries marked `[REMOVED]`.
-
-Topics: `ai-technology`, `career-work`, `investing-finance`, `leadership-management`,
-`marketing-growth`, `mindset-personal-dev`, `other`, `product-ux`, `sales-business-dev`,
-`startup-entrepreneurship`.
+A personal knowledge base at `~/knowledge/` is maintained by the personal-wiki pipeline.
+When professional topics come up (startups, AI, product, investing, leadership, marketing,
+career, mindset, sales), use the **kb** skill to search it before answering.
 ```
 
-Without this, the sync pipeline still works — but Claude won't know the knowledge base exists or search it on your behalf.
+**2. `~/.claude/skills/kb.md`** — the skill Claude invokes when it decides to search. The YAML description is always loaded (lightweight); the full instructions only load when the skill is actually used:
+
+```markdown
+---
+name: kb
+description: Search your personal knowledge base — saved posts from LinkedIn, Twitter, Apple Notes, and web clips, synthesized by Claude. Use proactively when the conversation touches startups, AI, product, investing, leadership, marketing, career, mindset, or sales. Invoke this skill before answering, then weave the findings in naturally.
+---
+
+The knowledge base lives at `~/knowledge/` with two layers:
+
+- `wiki/` — synthesized pages by topic, updated daily. Start here for themes and patterns.
+- `raw/`  — source posts with original voice, URLs, and dates. Use for specific quotes.
+- `synthesis.md` — cross-domain patterns, weekly helicopter view.
+
+## How to search
+
+Read the relevant wiki page first, then grep raw/ if you need specifics:
+
+    wiki/ai-technology.md        wiki/marketing-growth.md
+    wiki/career-work.md          wiki/mindset-personal-dev.md
+    wiki/investing-finance.md    wiki/product-ux.md
+    wiki/leadership-management.md wiki/sales-business-dev.md
+    wiki/other.md                wiki/startup-entrepreneurship.md
+
+## How to cite
+
+- Always include the source URL (the `**Link:**` field in raw/ entries)
+- Prefer wiki/ for broad themes, raw/ for direct quotes and original author voice
+- For AI and tech posts, note the date — weight recent content higher
+- Skip entries marked `[REMOVED]`
+- Weave findings into your answer naturally — don't dump search results
+```
+
+Without these two files, the sync pipeline still works — but Claude won't know the knowledge base exists or search it on your behalf.
 
 ## Configuration
 
