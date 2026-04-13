@@ -47,14 +47,14 @@ npm run init-kb    # Creates ~/knowledge/ structure (run once)
 
 This is what makes the project useful beyond a CLI. Two files wire the knowledge base into every Claude Code session:
 
-**1. `~/.claude/CLAUDE.md`** (global, create if it doesn't exist) — tells Claude the KB exists and when to reach for it:
+**1. `~/.claude/CLAUDE.md`** (global, create if it doesn't exist) — tells Claude the KB exists:
 
 ```markdown
 # Personal Knowledge Base
 
-A personal knowledge base at `~/knowledge/` is maintained by the personal-wiki pipeline.
-When professional topics come up (startups, AI, product, investing, leadership, marketing,
-career, mindset, sales), use the **kb** skill to search it before answering.
+A personal knowledge base at `~/knowledge/` is maintained by the personal-wiki pipeline
+(LinkedIn, Twitter, Apple Notes, web clips → daily synthesis). Search it proactively
+when professional topics come up.
 ```
 
 **2. `~/.claude/skills/kb.md`** — the skill Claude invokes when it decides to search. The YAML description is always loaded (lightweight); the full instructions only load when the skill is actually used:
