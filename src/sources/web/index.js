@@ -81,8 +81,8 @@ export const source = {
   supportsRemovedDetection: false,
 
   isEnabled(_config) {
-    // Enabled unless explicitly set to false (WEB_CLIP_DIR=false)
-    return _config.WEB_CLIP_DIR !== null || process.env.WEB_CLIP_DIR !== 'false'
+    // Enabled unless explicitly disabled via WEB_CLIP_DIR=false
+    return process.env.WEB_CLIP_DIR !== 'false'
   },
 
   async fetch({ mode, state, knownKeys }) {

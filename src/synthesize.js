@@ -141,7 +141,7 @@ export async function runCategoryUpdates(updatedSlugs, sinceDate) {
     return
   }
 
-  console.log(`\n⑤ Mise à jour des pages wiki (${updatedSlugs.length} catégories)...`)
+  console.log(`\n⑤ Updating wiki pages (${updatedSlugs.length} categories)...`)
 
   const results = await Promise.allSettled(
     updatedSlugs.map(async slug => {

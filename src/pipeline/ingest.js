@@ -7,7 +7,7 @@
 
 import { categorizeBatch } from '../categorize.js'
 import { writePosts, markRemoved } from '../writer.js'
-import { filterByAge, filterKnown } from './filters.js'
+import { filterKnown } from './filters.js'
 import { getSourceKnownIds, updateStateWithItems, reconcileRemovedIds } from './dedupe.js'
 
 function progressBar(current, total, width = 24) {

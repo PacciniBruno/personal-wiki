@@ -41,9 +41,6 @@ function selectSources() {
   if (sourceArg === 'all') {
     return getEnabledSources(config)
   }
-  if (sourceArg === 'all-enabled') {
-    return getEnabledSources(config)
-  }
 
   // Comma-separated list: --source=linkedin,twitter
   const ids = sourceArg.split(',').map(s => s.trim())
