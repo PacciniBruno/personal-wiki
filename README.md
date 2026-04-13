@@ -50,42 +50,22 @@ This is what makes the project useful beyond a CLI — add the following to your
 ```markdown
 # Personal Knowledge Base
 
-A curated, LLM-maintained knowledge base lives at `~/knowledge/`, fed by LinkedIn, Twitter,
-Apple Notes, and web clips. It uses a two-layer wiki pattern:
+A personal knowledge base at `~/knowledge/` is maintained automatically by the
+[personal-wiki](https://github.com/YOUR_USERNAME/personal-wiki) pipeline (LinkedIn,
+Twitter, Apple Notes, web clips → Claude Haiku categorization → daily wiki synthesis).
 
-- `~/knowledge/raw/`         — source posts, one file per topic, append-only
-- `~/knowledge/wiki/`        — LLM-synthesized knowledge pages, updated daily
+- `~/knowledge/wiki/`        — synthesized pages by topic, updated daily (start here)
+- `~/knowledge/raw/`         — source posts with URLs, append-only
 - `~/knowledge/synthesis.md` — cross-domain patterns, updated weekly
-- `~/knowledge/index.md`     — topic overview with post counts
 
-## When to search it
+**Search proactively** when the user discusses startups, AI, product, investing,
+leadership, marketing, career, mindset, or sales. Prefer `wiki/` for themes, `raw/`
+for specific quotes and original voice. Always cite the source URL (`**Link:**` field).
+Skip entries marked `[REMOVED]`.
 
-When the user discusses professional topics — startups, AI, product, investing,
-leadership, marketing, career, mindset, sales — search the knowledge base proactively:
-
-    # Synthesized insights by topic (start here)
-    cat ~/knowledge/wiki/ai-technology.md
-
-    # Keyword search across all wiki pages
-    grep -ri "keyword" ~/knowledge/wiki/
-
-    # Individual posts with source links and full text
-    grep -ri "keyword" ~/knowledge/raw/
-
-    # Cross-domain patterns and helicopter view
-    cat ~/knowledge/synthesis.md
-
-Available topic files: `ai-technology`, `career-work`, `investing-finance`,
-`leadership-management`, `marketing-growth`, `mindset-personal-dev`, `other`,
-`product-ux`, `sales-business-dev`, `startup-entrepreneurship`.
-
-## How to cite
-
-- Weave findings into your answer naturally — don't dump results
-- Always include the source URL (found in each raw entry under `**Link:**`)
-- Prefer `wiki/` for broad themes; prefer `raw/` for specific quotes and original voice
-- For fast-moving topics (AI, tech), note the post date — weight recent content higher
-- Entries marked `[REMOVED]` in raw/ were unsaved by the user and should be ignored
+Topics: `ai-technology`, `career-work`, `investing-finance`, `leadership-management`,
+`marketing-growth`, `mindset-personal-dev`, `other`, `product-ux`, `sales-business-dev`,
+`startup-entrepreneurship`.
 ```
 
 Without this, the sync pipeline still works — but Claude won't know the knowledge base exists or search it on your behalf.
