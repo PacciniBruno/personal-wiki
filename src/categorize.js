@@ -1,14 +1,15 @@
 /**
  * categorize.js
  *
- * Utilise Claude Haiku pour catégoriser chaque post LinkedIn.
- * Retourne une catégorie principale, une sous-catégorie, des tags et un résumé.
+ * Uses Claude Haiku to categorize each item regardless of source.
+ * Returns category, subcategory, tags[], and summary per item.
  */
 
 import Anthropic from '@anthropic-ai/sdk'
+import { USER_CONTEXT } from './config.js'
 
 const CATEGORIES = [
-  'Investing & Finance',        // VC, angel, fundraising, finance perso
+  'Investing & Finance',        // VC, angel, fundraising, personal finance
   'Startup & Entrepreneurship', // Founder stories, building, lessons learned
   'Product & UX',               // PM, design, user research, prototyping
   'Marketing & Growth',         // GTM, branding, SEO, content, growth hacking
@@ -24,17 +25,21 @@ const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 
 /**
- * Catégorise un post unique via Claude Haiku.
+ * Categorizes a single item via Claude Haiku.
+ *
+ * @param {import('./sources/types.js').SourceItem} item
  */
-export async function categorizePost(post) {
-  const authorLine = [post.author, post.authorTitle].filter(Boolean).join(' — ')
+export async function categorizeItem(item) {
+  const authorLine  = [item.author, item.authorTitle].filter(Boolean).join(' — ')
+  const titleLine   = item.title ? `Title: ${item.title}\n` : ''
   // Remove lone surrogates (invalid UTF-16) that break JSON serialization
-  const textSnippet = post.text.slice(0, 1500).replace(/[\uD800-\uDFFF]/g, '')
+  const textSnippet = (item.text ?? '').slice(0, 1500).replace(/[\uD800-\uDFFF]/g, '')
 
-  const prompt = `You are categorizing a LinkedIn post saved by a founder and product leader (French, ex-CPO of a fintech).
+  const prompt = `You are categorizing a saved item for ${USER_CONTEXT}.
 
-Post author: ${authorLine || 'Unknown'}
-Post text:
+Source: ${item.source} (${item.sourceType})
+Author: ${authorLine || 'Unknown'}
+${titleLine}Content:
 """
 ${textSnippet}
 """
@@ -61,49 +66,47 @@ Respond with ONLY valid JSON, no markdown, no explanation:
   try {
     json = JSON.parse(message.content[0].text.trim())
   } catch {
-    // Haiku a parfois du texte autour du JSON — on l'extrait
+    // Haiku occasionally wraps JSON in text — extract it
     const match = message.content[0].text.match(/\{[\s\S]*\}/)
     if (!match) throw new Error('Claude returned invalid JSON')
     json = JSON.parse(match[0])
   }
 
-  // Validation et fallbacks
   if (!CATEGORIES.includes(json.category)) json.category = 'Other'
   if (!Array.isArray(json.tags)) json.tags = []
   json.tags = json.tags.slice(0, 3).map(t => String(t).trim()).filter(Boolean)
   json.subcategory = (json.subcategory ?? '').trim()
-  json.summary = (json.summary ?? '').trim()
+  json.summary     = (json.summary     ?? '').trim()
 
   return json
 }
 
 /**
- * Catégorise un tableau de posts avec gestion du rate limiting et affichage de progression.
+ * Categorizes an array of items with rate-limit pacing and progress reporting.
+ *
+ * @param {import('./sources/types.js').SourceItem[]} items
+ * @param {{ onProgress?: (n: number, total: number) => void }} options
+ * @returns {Promise<Array<import('./sources/types.js').SourceItem & { category: string, subcategory: string, tags: string[], summary: string }>>}
  */
-export async function categorizeBatch(posts, { onProgress } = {}) {
+export async function categorizeBatch(items, { onProgress } = {}) {
   const results = []
 
-  for (let i = 0; i < posts.length; i++) {
-    const post = posts[i]
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i]
 
     try {
-      const cat = await categorizePost(post)
-      results.push({ ...post, ...cat })
+      const cat = await categorizeItem(item)
+      results.push({ ...item, ...cat })
     } catch (err) {
-      console.error(`\n⚠️  Erreur catégorisation post ${i + 1}: ${err.message}`)
+      console.error(`\n⚠️  Categorization failed for item ${i + 1}: ${err.message}`)
       results.push({
-        ...post,
-        category: 'Other',
-        subcategory: '',
-        tags: [],
-        summary: '',
+        ...item,
+        category: 'Other', subcategory: '', tags: [], summary: '',
       })
     }
 
-    onProgress?.(i + 1, posts.length)
-
-    // Délai entre les requêtes pour rester dans les rate limits Anthropic
-    if (i < posts.length - 1) await sleep(150)
+    onProgress?.(i + 1, items.length)
+    if (i < items.length - 1) await sleep(150)
   }
 
   return results

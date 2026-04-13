@@ -1,10 +1,8 @@
 /**
  * writer.js
  *
- * Appends categorized LinkedIn posts to ~/knowledge/raw/{category}.md,
- * updates ~/knowledge/index.md post counts, and appends to log.md.
- *
- * Replaces notion.js.
+ * Appends categorized items to $KB_DIR/raw/{category}.md,
+ * updates index.md post counts, and appends to log.md.
  */
 
 import { appendFile, readFile, writeFile } from 'fs/promises'
@@ -107,8 +105,9 @@ export async function writePosts(posts) {
     // Log entry
     const date   = new Date().toISOString().slice(0, 10)
     const author = post.author?.trim() || 'Unknown'
-    const url    = post.url ?? post.uniqueKey ?? ''
-    await appendFile(LOG_FILE, `[INGEST] ${date} | ${post.category ?? 'Other'} | ${author} | ${url}\n`, 'utf8')
+    const url    = post.url ?? post.externalId ?? post.uniqueKey ?? ''
+    const src    = post.source ? `${post.source} | ` : ''
+    await appendFile(LOG_FILE, `[INGEST] ${date} | ${src}${post.category ?? 'Other'} | ${author} | ${url}\n`, 'utf8')
 
     countsBySlug[slug] = (countsBySlug[slug] ?? 0) + 1
     updatedSlugs.add(slug)
@@ -127,7 +126,7 @@ export async function markRemoved(post, category) {
   const slug    = categoryToSlug(category ?? 'Other')
   const rawFile = join(RAW_DIR, `${slug}.md`)
   const date    = new Date().toISOString().slice(0, 10)
-  const url     = post.url ?? post.uniqueKey ?? ''
+  const url     = post.url ?? post.externalId ?? post.uniqueKey ?? ''
 
   // Read raw file and prepend [REMOVED date] to the matching heading
   let content

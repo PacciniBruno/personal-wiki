@@ -21,6 +21,7 @@ import { spawn } from 'child_process'
 import { join } from 'path'
 import { CATEGORIES, KB_DIR } from './init-kb.js'
 import { rawFilePath, wikiFilePath } from './writer.js'
+import { CLAUDE_BIN } from './config.js'
 
 
 // Spawns claude -p with the prompt fed via stdin (avoids variadic --allowedTools eating the prompt arg)
@@ -48,8 +49,6 @@ function claudePrint(prompt, timeoutMs) {
 }
 
 
-// Path to the claude CLI — baked in at install time, override via CLAUDE_BIN env var
-const CLAUDE_BIN = process.env.CLAUDE_BIN ?? '/Users/brunopaccini/.nvm/versions/node/v22.14.0/bin/claude'
 const SYNTHESIS_FILE = join(KB_DIR, 'synthesis.md')
 const ALLOWED_TOOLS  = 'Read Write Glob Grep Bash'
 
@@ -142,7 +141,7 @@ export async function runCategoryUpdates(updatedSlugs, sinceDate) {
     return
   }
 
-  console.log(`\n⑤ Mise à jour des pages wiki (${updatedSlugs.length} catégories)...`)
+  console.log(`\n⑤ Updating wiki pages (${updatedSlugs.length} categories)...`)
 
   const results = await Promise.allSettled(
     updatedSlugs.map(async slug => {

@@ -2,15 +2,15 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-# LinkedIn → Knowledge Base Sync
+# personal-wiki
 
-Scrapes LinkedIn saved posts (no official API), categorizes them with Claude Haiku,
-and writes them into a local markdown knowledge base at `~/knowledge/`.
+Ingests content from multiple sources (LinkedIn, Obsidian, Apple Notes), categorizes
+it with Claude Haiku, and writes it into a local markdown knowledge base (KB_DIR, default: `~/knowledge/`).
 
 ## Commands
 
 ```bash
-npm run init-kb          # Create ~/knowledge/ structure (run once before first sync)
+npm run init-kb          # Create knowledge base structure (run once)
 npm run bootstrap        # Full import of all saved posts + wiki synthesis
 npm run sync             # Incremental sync (new posts only) + wiki synthesis
 npm run update-wiki      # Re-run tier-1 wiki synthesis for all categories (manual)
@@ -20,32 +20,32 @@ DEBUG=1 npm run sync     # Verbose: logs all Voyager URLs, saves debug JSON file
 
 ## Architecture
 
-Pipeline in `src/index.js` runs 5 steps: scrape → categorize → write to raw/ → update wiki pages → (done).
-
 ```
 src/
+  config.js        Central config — all paths and feature flags, reads from .env
   index.js         CLI orchestrator. Reads --mode=bootstrap|sync.
-  scraper.js       Puppeteer opens Chrome (visible). Intercepts LinkedIn Voyager API,
-                   captures auth headers, paginates via native fetch(). Unchanged.
+  sources/linkedin/
+    session.js     Puppeteer opens Chrome (visible). Intercepts LinkedIn Voyager API,
+                   captures auth headers.
+    parser.js      Paginates via native fetch(), parses Voyager responses → SourceItems.
+    index.js       SourceAdapter: orchestrates session + parser.
   categorize.js    Claude Haiku (claude-haiku-4-5-20251001). Returns category,
-                   subcategory, tags[], summary per post. 150ms delay. Unchanged.
-  state.js         Loads/saves ~/.linkedin-notion-sync/state.json (knownKeys for dedup).
-  writer.js        Appends formatted post entries to ~/knowledge/raw/{slug}.md.
-                   Updates ~/knowledge/index.md counts. Appends to log.md.
-  init-kb.js       Creates ~/knowledge/ folder structure, CLAUDE.md, index.md, log.md,
-                   synthesis.md, and empty raw/ + wiki/ topic files. Idempotent.
+                   subcategory, tags[], summary per post. 150ms delay.
+  state.js         Loads/saves $STATE_DIR/state.json (knownKeys for dedup).
+  writer.js        Appends formatted post entries to $KB_DIR/raw/{slug}.md.
+                   Updates index.md counts. Appends to log.md.
+  init-kb.js       Creates knowledge base folder structure. Idempotent.
   synthesize.js    Two-tier wiki synthesis via `claude -p` (full Claude Code harness):
                    - Tier 1 (daily): parallel claude -p per updated category →
-                     updates ~/knowledge/wiki/{slug}.md
+                     updates wiki/{slug}.md
                    - Tier 2 (weekly): single claude -p reads all wiki/ pages →
-                     updates ~/knowledge/synthesis.md (cross-domain patterns)
+                     updates synthesis.md (cross-domain patterns)
 ```
 
 ## Knowledge base structure
 
 ```
-~/knowledge/
-  CLAUDE.md             # Navigation guide for any Claude session
+$KB_DIR/  (default: ~/knowledge/)
   index.md              # Topic index with post counts and last-updated dates
   log.md                # Append-only ingest log ([INGEST] / [REMOVED] prefixes)
   synthesis.md          # Cross-domain patterns, helicopter view (weekly)
@@ -65,29 +65,26 @@ src/
 
 ## State persistence
 
-`~/.linkedin-notion-sync/state.json` stores:
+`$STATE_DIR/state.json` (default: `~/.personal-wiki/state.json`) stores:
 - `knownKeys` — array of all post URLs/URNs already written (for dedup + sync stopping)
 
-`~/.linkedin-notion-sync/chrome-session/` — Puppeteer user data. LinkedIn session
-persists here so login only needed once.
+`$STATE_DIR/chrome-session/` — Puppeteer user data. LinkedIn session persists here so login only needed once.
 
 ## Environment variables (.env)
 
-```
-ANTHROPIC_API_KEY=sk-ant-...   # console.anthropic.com — required
-```
+See `.env.example` for the full reference. Required:
 
-No longer needed: `NOTION_TOKEN`, `NOTION_PARENT_PAGE_ID`, `VOYAGE_API_KEY`.
+```
+ANTHROPIC_API_KEY=sk-ant-...
+```
 
 ## Automation (launchd)
 
-Two plists in `scripts/` — copy to `~/Library/LaunchAgents/` and `launchctl load`:
+Templates in `scripts/*.plist.template` — copy, fill in YOUR_USERNAME/YOUR_NODE_PATH/YOUR_PROJECT_PATH,
+then load with `launchctl load`.
 
-- `com.brunopaccini.linkedin-sync.plist` — daily 08:00: sync + tier-1 wiki update
-- `com.brunopaccini.linkedin-synthesis.plist` — weekly Sunday 09:00: tier-2 synthesis
-
-Chrome opens briefly and closes automatically (session is persisted). No manual
-intervention needed once the LinkedIn session is established.
+- `personal-wiki-sync` — daily: sync + tier-1 wiki update
+- `personal-wiki-synthesis` — weekly: tier-2 synthesis
 
 ## How the LinkedIn scraping works
 
@@ -110,13 +107,12 @@ DEBUG=1 npm run bootstrap
 
 Saves `./debug-first-response.json` and `./debug-all-voyager.json`. If the scraper
 fails to intercept, check the Voyager URL patterns and response structure in these files,
-then update `extractElements()` and `looksLikePost()` in scraper.js.
+then update `extractElements()` and `looksLikePost()` in `src/sources/linkedin/parser.js`.
 
 ## Key constraints when making changes
 
 - **ESM only** — `"type": "module"` in package.json. Use `import/export`, not `require`.
-- **`claude -p` path** — `synthesize.js` uses `CLAUDE_BIN` env var (fallback hardcoded).
-  If the claude CLI moves, update the launchd plists and the fallback in synthesize.js.
+- **`claude -p` path** — `synthesize.js` gets CLAUDE_BIN from `src/config.js` (auto-detected via `which claude`, or set CLAUDE_BIN in .env).
 - **Pagination** — `buildPaginatedUrl()` handles REST (`?start=N`), GraphQL
   (`?variables=(start:N,...)`), and cursor-based pagination. LinkedIn changes this.
 - **Dedup key** — `post.uniqueKey` = URL if available, else URN. Stored in state.json.
