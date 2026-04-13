@@ -139,6 +139,7 @@ export async function initKB() {
   // Create directories
   await mkdir(RAW_DIR,  { recursive: true })
   await mkdir(WIKI_DIR, { recursive: true })
+  await mkdir(join(KB_DIR, 'chrome-clipped'), { recursive: true })
 
   // Root files
   await writeIfMissing(join(KB_DIR, 'CLAUDE.md'),    CLAUDE_MD)

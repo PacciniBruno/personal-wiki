@@ -50,11 +50,14 @@ export const CLAUDE_BIN = detectClaudeBin()
 
 // ─── Sources ──────────────────────────────────────────────────────────────────
 
-/** Path to Obsidian vault. null → source is disabled. */
-export const OBSIDIAN_VAULT      = process.env.OBSIDIAN_VAULT      ?? null
-
-/** Tag that marks an Obsidian note for wiki ingestion. */
-export const OBSIDIAN_SYNC_TAG   = process.env.OBSIDIAN_SYNC_TAG   ?? 'wiki'
+/**
+ * Drop folder for web clips (Obsidian Web Clipper output, or any other clipper).
+ * Default: $KB_DIR/chrome-clipped — set to null to disable this source.
+ * The folder is created automatically on first init-kb run.
+ */
+export const WEB_CLIP_DIR = process.env.WEB_CLIP_DIR === 'false'
+  ? null
+  : (process.env.WEB_CLIP_DIR ?? null) // null means "use default KB_DIR/chrome-clipped" — resolved in the adapter
 
 /** Apple Notes folder name to scan for saved links. null → source is disabled. */
 export const APPLE_NOTES_FOLDER  = process.env.APPLE_NOTES_FOLDER  ?? null
@@ -83,7 +86,7 @@ export const USER_CONTEXT = process.env.USER_CONTEXT ?? 'a professional saving c
 /** Full config as a plain object — passed to source.isEnabled(config). */
 export const config = {
   KB_DIR, STATE_DIR, CLAUDE_BIN,
-  OBSIDIAN_VAULT, OBSIDIAN_SYNC_TAG,
+  WEB_CLIP_DIR,
   APPLE_NOTES_FOLDER,
   TWITTER_SESSION_FILE, TWITTER_MAX_AGE_DAYS,
   USER_CONTEXT,

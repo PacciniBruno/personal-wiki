@@ -8,12 +8,39 @@
 
 import puppeteer from 'puppeteer'
 import { join } from 'path'
-import { mkdir, writeFile } from 'fs/promises'
+import { mkdir, writeFile, access, cp } from 'fs/promises'
+import { homedir } from 'os'
 import { createInterface } from 'readline'
 import { STATE_DIR } from '../../config.js'
 import { extractElements, looksLikePost, extractPaging } from './parser.js'
 
 const SESSION_DIR     = join(STATE_DIR, 'chrome-session')
+const OLD_SESSION_DIR = join(homedir(), '.linkedin-notion-sync', 'chrome-session')
+
+/**
+ * One-time migration: copies the LinkedIn Chrome session from the old state
+ * directory (~/.linkedin-notion-sync/) to the new one (~/.personal-wiki/) if
+ * the new directory does not yet exist. Runs silently — never throws.
+ */
+async function migrateOldSession() {
+  // We look at the Cookies file (not just the directory) because Chrome creates
+  // a minimal empty profile on first launch — the Cookies file may exist but be tiny.
+  // A Cookies file < 24 KB is almost certainly empty (no real session data).
+  const newCookies = join(SESSION_DIR, 'Default', 'Cookies')
+  const oldCookies = join(OLD_SESSION_DIR, 'Default', 'Cookies')
+
+  const { stat } = await import('fs/promises')
+
+  const newSize = await stat(newCookies).then(s => s.size).catch(() => 0)
+  const oldSize = await stat(oldCookies).then(s => s.size).catch(() => 0)
+
+  if (newSize >= 24_576) return   // new session looks real — nothing to do
+  if (oldSize  < 24_576) return   // old session also empty — fresh start, need login
+
+  console.log('   Migrating LinkedIn session from old location...')
+  await cp(OLD_SESSION_DIR, SESSION_DIR, { recursive: true, force: true })
+  console.log('   ✅ Session migrated — no login needed.')
+}
 const SAVED_POSTS_URL = 'https://www.linkedin.com/my-items/saved-posts/'
 const sleep           = ms => new Promise(r => setTimeout(r, ms))
 
@@ -34,6 +61,7 @@ const EXCLUDE_URL_PATTERNS = [
  * @returns {Promise<{endpoint: string, paging: Object, headers: Object, firstBatch: Object}>}
  */
 export async function getLinkedInSession() {
+  await migrateOldSession()
   await mkdir(SESSION_DIR, { recursive: true })
 
   const browser = await puppeteer.launch({
