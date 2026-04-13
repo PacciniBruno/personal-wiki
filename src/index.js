@@ -1,165 +1,116 @@
 /**
- * index.js — CLI principal
+ * index.js — CLI orchestrator.
  *
- * Usage :
- *   node src/index.js --mode=bootstrap   → importe TOUS les posts enregistrés
- *   node src/index.js --mode=sync        → importe seulement les nouveaux (défaut)
- *   DEBUG=1 node src/index.js            → sauvegarde la réponse brute de l'API pour debug
+ * Usage:
+ *   node src/index.js --mode=sync              (default: LinkedIn only)
+ *   node src/index.js --mode=bootstrap
+ *   node src/index.js --mode=sync --source=all
+ *   node src/index.js --mode=sync --source=linkedin
+ *   node src/index.js --mode=sync --source=twitter,web
  *
- * Pipeline :
- *   ① Session LinkedIn (Puppeteer)
- *   ② Récupération des posts
- *   ③ Catégorisation (Claude Haiku)
- *   ④ Écriture dans ~/knowledge/raw/
- *   ⑤ Mise à jour des pages wiki (claude -p, parallèle par catégorie)
- *   [bootstrap only] Détection des posts désauvegardés
+ * Pipeline delegated to src/pipeline/ingest.js.
+ * Source selection delegated to src/sources/index.js.
  */
 
 import 'dotenv/config'
-import { writeFile } from 'fs/promises'
-import { join } from 'path'
-import { homedir } from 'os'
-import { getLinkedInSession, fetchAllSavedPosts } from './scraper.js'
-import { categorizeBatch } from './categorize.js'
-import { writePosts, markRemoved } from './writer.js'
-import { runCategoryUpdates } from './synthesize.js'
-import { loadState, saveState } from './state.js'
+import { KB_DIR, config }                    from './config.js'
+import { loadState, saveState }              from './state.js'
+import { runCategoryUpdates }                from './synthesize.js'
+import { ingest }                            from './pipeline/ingest.js'
+import { ALL_SOURCES, getEnabledSources, getSourceById } from './sources/index.js'
 
 // ─── CLI args ────────────────────────────────────────────────────────────────
 
-const args        = process.argv.slice(2)
-const mode        = args.find(a => a.startsWith('--mode='))?.split('=')[1] ?? 'sync'
-const isBootstrap = mode === 'bootstrap'
+const args       = process.argv.slice(2)
+const mode       = args.find(a => a.startsWith('--mode='))?.split('=')[1]   ?? 'sync'
+const sourceArg  = args.find(a => a.startsWith('--source='))?.split('=')[1] ?? 'linkedin'
 
-// ─── Validation env ──────────────────────────────────────────────────────────
+// ─── Env validation ──────────────────────────────────────────────────────────
 
 function validateEnv() {
-  const required = {
-    ANTHROPIC_API_KEY: 'https://console.anthropic.com',
+  if (!process.env.ANTHROPIC_API_KEY) {
+    console.error('\n❌ ANTHROPIC_API_KEY is missing from .env')
+    console.error('   Get one at https://console.anthropic.com\n')
+    process.exit(1)
   }
-
-  const missing = Object.entries(required).filter(([k]) => !process.env[k])
-  if (missing.length === 0) return
-
-  console.error("\n❌ Variables d'environnement manquantes dans .env :\n")
-  missing.forEach(([key, hint]) => console.error(`   ${key}\n   → ${hint}\n`))
-  process.exit(1)
 }
 
-// ─── Barre de progression ────────────────────────────────────────────────────
+// ─── Source selection ─────────────────────────────────────────────────────────
 
-function progressBar(current, total, width = 24) {
-  const filled = Math.round((current / total) * width)
-  return '█'.repeat(filled) + '░'.repeat(width - filled)
-}
-
-// ─── Unsave detection (bootstrap only) ──────────────────────────────────────
-
-async function detectUnsaved(fetchedPosts, state) {
-  if (!isBootstrap) return
-
-  const fetchedKeys = new Set(fetchedPosts.map(p => p.uniqueKey).filter(Boolean))
-  const knownKeys   = new Set(state.knownKeys ?? [])
-
-  const removedKeys = [...knownKeys].filter(k => !fetchedKeys.has(k))
-  if (removedKeys.length === 0) return
-
-  console.log(`\n🗑  ${removedKeys.length} post(s) désauvegardé(s) détecté(s) — marquage dans raw/...`)
-
-  // We don't have the category stored per-key, so we pass 'Other' as fallback.
-  // The writer.markRemoved will search by URL across raw files.
-  for (const key of removedKeys) {
-    const fakePost = { uniqueKey: key, url: key }
-    await markRemoved(fakePost, 'Other')
+function selectSources() {
+  if (sourceArg === 'all') {
+    return getEnabledSources(config)
   }
+  if (sourceArg === 'all-enabled') {
+    return getEnabledSources(config)
+  }
+
+  // Comma-separated list: --source=linkedin,twitter
+  const ids = sourceArg.split(',').map(s => s.trim())
+  const sources = []
+
+  for (const id of ids) {
+    const adapter = getSourceById(id)
+    if (!adapter) {
+      console.error(`\n❌ Unknown source: "${id}". Available: ${ALL_SOURCES.map(s => s.id).join(', ')}`)
+      process.exit(1)
+    }
+    if (!adapter.isEnabled(config)) {
+      console.error(`\n❌ Source "${id}" is not configured. Check .env.example for required variables.`)
+      process.exit(1)
+    }
+    sources.push(adapter)
+  }
+
+  return sources
 }
 
 // ─── Main ────────────────────────────────────────────────────────────────────
 
 async function main() {
-  console.log('\n╔══════════════════════════════════════╗')
-  console.log('║   LinkedIn → Knowledge Base  📚      ║')
-  console.log('╚══════════════════════════════════════╝\n')
+  console.log('\n╔═══════════════════════════════════════╗')
+  console.log('║       Personal Wiki  📚               ║')
+  console.log('╚═══════════════════════════════════════╝\n')
 
   validateEnv()
 
-  const state     = await loadState()
-  const knownKeys = new Set(state.knownKeys ?? [])
+  const activeSources = selectSources()
+  const kbPath = KB_DIR.replace(process.env.HOME ?? '', '~')
 
-  if (isBootstrap) {
-    console.log('📋 Mode : Bootstrap — tous les posts seront importés')
-  } else {
-    console.log(`📋 Mode : Sync — ${knownKeys.size} posts déjà en base`)
-  }
+  console.log(`Mode:    ${mode}`)
+  console.log(`Sources: ${activeSources.map(s => s.label).join(', ')}`)
+  console.log(`KB:      ${kbPath}\n`)
 
-  // ── Étape 1 : Session LinkedIn ─────────────────────────────────────────────
+  const state = await loadState()
 
-  console.log('\n① Ouverture de LinkedIn...')
-  const session = await getLinkedInSession()
+  // ── Ingest ────────────────────────────────────────────────────────────────
 
-  // ── Étape 2 : Récupération des posts ──────────────────────────────────────
+  const { categorized, updatedSlugs } = await ingest({ activeSources, mode, state })
 
-  console.log('\n② Récupération des posts enregistrés...')
-  const posts = await fetchAllSavedPosts(session, {
-    onlyNew: !isBootstrap,
-    knownKeys,
-  })
+  // ── Save state ────────────────────────────────────────────────────────────
 
-  // Detect unsaved posts during bootstrap (compare full set against knownKeys)
-  await detectUnsaved(posts, state)
+  await saveState(state)
 
-  if (posts.length === 0) {
-    console.log('\n✨ Tout est à jour — aucun nouveau post.')
+  if (categorized.length === 0) {
+    console.log('\n✨ All up to date — no new items.')
     process.exit(0)
   }
 
-  // ── Étape 3 : Catégorisation ───────────────────────────────────────────────
+  // ── Wiki synthesis ────────────────────────────────────────────────────────
 
-  console.log(`\n③ Catégorisation de ${posts.length} posts avec Claude Haiku...`)
-
-  const categorized = await categorizeBatch(posts, {
-    onProgress: (n, total) => {
-      process.stdout.write(`\r   [${progressBar(n, total)}] ${n}/${total}`)
-    },
-  })
-
-  console.log('\n')
-
-  // ── Étape 4 : Écriture dans la base de connaissances ─────────────────────
-
-  console.log('④ Écriture dans ~/knowledge/raw/...')
-  const updatedSlugs = await writePosts(categorized)
-
-  // Update state with new known keys
-  for (const post of categorized) {
-    if (post.uniqueKey) knownKeys.add(post.uniqueKey)
-  }
-  // In bootstrap, also remove unsaved keys from state
-  if (isBootstrap) {
-    const fetchedKeys = new Set(posts.map(p => p.uniqueKey).filter(Boolean))
-    for (const k of [...state.knownKeys ?? []]) {
-      if (!fetchedKeys.has(k)) knownKeys.delete(k)
-    }
-  }
-  state.knownKeys = [...knownKeys]
-  await saveState(state)
-
-  console.log(`   ✅ ${categorized.length} posts écrits dans ${updatedSlugs.length} catégorie(s).`)
-
-  // ── Étape 5 : Mise à jour des pages wiki ──────────────────────────────────
-
-  const since = new Date(Date.now() - 7 * 86400_000).toISOString().slice(0, 10)
+  const since = new Date(Date.now() - 7 * 86_400_000).toISOString().slice(0, 10)
   await runCategoryUpdates(updatedSlugs, since)
 
-  // ── Résumé ─────────────────────────────────────────────────────────────────
+  // ── Summary ───────────────────────────────────────────────────────────────
 
-  console.log('\n╔══════════════════════════════════════╗')
-  console.log(`║  ✅ ${String(categorized.length).padEnd(4)} posts ajoutés à ~/knowledge/  ║`)
-  console.log('╚══════════════════════════════════════╝\n')
+  console.log('\n╔═══════════════════════════════════════╗')
+  console.log(`║  ✅ ${String(categorized.length).padEnd(4)} items added to wiki          ║`)
+  console.log(`║     ${kbPath.padEnd(33)} ║`)
+  console.log('╚═══════════════════════════════════════╝\n')
 }
 
 main().catch(err => {
-  console.error('\n❌ Erreur fatale :', err.message)
+  console.error('\n❌ Fatal error:', err.message)
   if (process.env.DEBUG) console.error(err)
   process.exit(1)
 })

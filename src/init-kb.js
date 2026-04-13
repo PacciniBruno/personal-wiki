@@ -10,9 +10,10 @@
 import { mkdir, writeFile, access } from 'fs/promises'
 import { join } from 'path'
 import { homedir } from 'os'
+import { KB_DIR } from './config.js'
 
-export const KB_DIR = join(homedir(), 'knowledge')
-export const RAW_DIR = join(KB_DIR, 'raw')
+export { KB_DIR }
+export const RAW_DIR  = join(KB_DIR, 'raw')
 export const WIKI_DIR = join(KB_DIR, 'wiki')
 
 export const CATEGORIES = [

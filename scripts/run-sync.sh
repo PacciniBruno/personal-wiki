@@ -3,19 +3,20 @@
 # Called by launchd on every hourly tick and on wake from sleep.
 # Exits immediately (no-op) if already ran today.
 
-STAMP="$HOME/.linkedin-notion-sync/last-sync-date"
+STATE_DIR="${STATE_DIR:-$HOME/.personal-wiki}"
+STAMP="$STATE_DIR/last-sync-date"
 TODAY=$(date +%Y-%m-%d)
 
 if [ -f "$STAMP" ] && [ "$(cat "$STAMP")" = "$TODAY" ]; then
   exit 0
 fi
 
-NODE="/Users/brunopaccini/.nvm/versions/node/v22.14.0/bin/node"
-DIR="/Users/brunopaccini/Documents/Dev/linkedin-notion-sync"
+NODE="$(command -v node)"
+DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 cd "$DIR"
-
 "$NODE" src/index.js --mode=sync && "$NODE" src/synthesize.js --tier=1
 
 # Write stamp after success so a failure retries on next wake
+mkdir -p "$STATE_DIR"
 echo "$TODAY" > "$STAMP"

@@ -1,7 +1,7 @@
 {
-  "name": "linkedin-notion-sync",
-  "version": "1.0.0",
-  "description": "Sync LinkedIn saved posts to Notion with AI categorization",
+  "name": "personal-wiki",
+  "version": "2.0.0",
+  "description": "AI-powered personal knowledge base fed by LinkedIn, Obsidian, Apple Notes, and more",
   "type": "module",
   "scripts": {
     "bootstrap": "node src/index.js --mode=bootstrap",
