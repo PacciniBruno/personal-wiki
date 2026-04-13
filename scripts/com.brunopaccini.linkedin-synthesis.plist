@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Weekly cross-domain synthesis (tier-2).
+  Runs once per ISO week — on first wake of any day in a new week.
+
+  How it works:
+  - launchd fires every hour (StartInterval) and immediately on wake from sleep
+    if the last run was >1 hour ago.
+  - The inline guard exits immediately if already ran this week (stamp in
+    ~/.linkedin-notion-sync/last-synthesis-week, format: 2026-W15).
+  - On failure the stamp is NOT written, so the next wake retries automatically.
+
+  Install:
+    cp scripts/com.brunopaccini.linkedin-synthesis.plist ~/Library/LaunchAgents/
+    launchctl unload ~/Library/LaunchAgents/com.brunopaccini.linkedin-synthesis.plist
+    launchctl load ~/Library/LaunchAgents/com.brunopaccini.linkedin-synthesis.plist
+
+  Logs:
+    ~/Library/Logs/linkedin-synthesis.log
+    ~/Library/Logs/linkedin-synthesis.error.log
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.brunopaccini.linkedin-synthesis</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string>
+    <string>-c</string>
+    <string>
+      STAMP="$HOME/.linkedin-notion-sync/last-synthesis-week";
+      THIS_WEEK=$(date +%Y-W%V);
+      [ -f "$STAMP" ] &amp;&amp; [ "$(cat "$STAMP")" = "$THIS_WEEK" ] &amp;&amp; exit 0;
+      NODE=/Users/brunopaccini/.nvm/versions/node/v22.14.0/bin/node;
+      DIR=/Users/brunopaccini/Documents/Dev/linkedin-notion-sync;
+      cd "$DIR" &amp;&amp;
+      "$NODE" src/synthesize.js --tier=2 &amp;&amp;
+      echo "$THIS_WEEK" > "$STAMP"
+    </string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key>
+    <string>/Users/brunopaccini</string>
+    <key>PATH</key>
+    <string>/Users/brunopaccini/.nvm/versions/node/v22.14.0/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>CLAUDE_BIN</key>
+    <string>/Users/brunopaccini/.nvm/versions/node/v22.14.0/bin/claude</string>
+  </dict>
+
+  <!-- Fire every hour; launchd also fires on wake if interval elapsed during sleep -->
+  <key>StartInterval</key>
+  <integer>3600</integer>
+
+  <!-- Also run immediately when the agent loads at login -->
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/brunopaccini/Library/Logs/linkedin-synthesis.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/brunopaccini/Library/Logs/linkedin-synthesis.error.log</string>
+</dict>
+</plist>

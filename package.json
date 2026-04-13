@@ -1,0 +1,18 @@
+{
+  "name": "linkedin-notion-sync",
+  "version": "1.0.0",
+  "description": "Sync LinkedIn saved posts to Notion with AI categorization",
+  "type": "module",
+  "scripts": {
+    "bootstrap": "node src/index.js --mode=bootstrap",
+    "sync": "node src/index.js --mode=sync",
+    "init-kb": "node src/init-kb.js",
+    "update-wiki": "node src/synthesize.js --tier=1",
+    "update-wiki:cross": "node src/synthesize.js --tier=2"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.1",
+    "dotenv": "^16.4.5",
+    "puppeteer": "^22.12.1"
+  }
+}

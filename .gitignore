@@ -1,0 +1,21 @@
+# Environment — never commit secrets
+.env
+.env.*
+!.env.example
+
+# Debug artifacts — contain LinkedIn API response data
+debug-*.json
+
+# Dependencies
+node_modules/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Claude Code local settings (machine-specific permission grants)
+.claude/settings.local.json
+
+# Logs
+*.log
