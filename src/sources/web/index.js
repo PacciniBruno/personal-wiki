@@ -30,19 +30,45 @@ function getClipDir() {
 
 /**
  * Parses YAML-ish frontmatter from a markdown file.
- * Handles the simple key: value format Obsidian Web Clipper produces.
+ * Handles the format Obsidian Web Clipper produces, including:
+ *   - Quoted string values: title: "My Title"
+ *   - YAML list fields:     author:\n  - "[[Name]]"  → "Name"
+ *   - WikiLink author:      [[David Cahn]] → "David Cahn"
+ *   - Multiple date keys:   published / created / date / saved
  */
 function parseFrontmatter(content) {
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/)
   if (!match) return { meta: {}, body: content.trim() }
 
   const meta = {}
-  for (const line of match[1].split(/\r?\n/)) {
+  const lines = match[1].split(/\r?\n/)
+  let currentKey = null
+
+  for (const line of lines) {
     const colon = line.indexOf(':')
-    if (colon === -1) continue
+
+    // YAML list item under a previous key (e.g. "  - "[[David Cahn]]"")
+    if (/^\s+-\s+/.test(line) && currentKey) {
+      const item = line.replace(/^\s+-\s+/, '').trim().replace(/^["']|["']$/g, '')
+      // If not already set (take first item)
+      if (!meta[currentKey]) meta[currentKey] = item
+      continue
+    }
+
+    if (colon === -1) { currentKey = null; continue }
+
     const key = line.slice(0, colon).trim()
     const val = line.slice(colon + 1).trim().replace(/^["']|["']$/g, '')
-    if (key) meta[key] = val
+    if (!key) continue
+
+    currentKey = key
+    if (val) meta[key] = val  // only set if non-empty (list values come on next lines)
+  }
+
+  // Unwrap Obsidian WikiLinks: [[David Cahn]] → David Cahn
+  for (const [k, v] of Object.entries(meta)) {
+    const wikiMatch = v.match(/^\[\[(.+?)\]\]$/)
+    if (wikiMatch) meta[k] = wikiMatch[1]
   }
 
   return { meta, body: match[2].trim() }
@@ -85,7 +111,7 @@ export const source = {
       }
 
       const { meta, body } = parseFrontmatter(content)
-      const url        = meta.url ?? meta.source ?? ''
+      const url        = meta.url ?? meta.source ?? meta.link ?? ''
       const externalId = url || filename
 
       if (knownKeys.has(externalId)) {
@@ -103,8 +129,10 @@ export const source = {
         title:       meta.title ?? basename(filename, '.md'),
         text:        body.slice(0, 3000),
         author:      meta.author ?? meta.site ?? '',
-        authorTitle: '',
-        savedAt:     meta.date ? new Date(meta.date).toISOString() : new Date().toISOString(),
+        authorTitle: meta.description ?? '',
+        savedAt:     (meta.date ?? meta.saved ?? meta.created ?? meta.published)
+                       ? new Date(meta.date ?? meta.saved ?? meta.created ?? meta.published).toISOString()
+                       : new Date().toISOString(),
         createdAt:   null,
         publishedAt: null,
         tags:        [],

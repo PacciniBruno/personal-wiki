@@ -62,9 +62,6 @@ export const WEB_CLIP_DIR = process.env.WEB_CLIP_DIR === 'false'
 /** Apple Notes folder name to scan for saved links. null → source is disabled. */
 export const APPLE_NOTES_FOLDER  = process.env.APPLE_NOTES_FOLDER  ?? null
 
-/** Twitter session file path. null → source is disabled. */
-export const TWITTER_SESSION_FILE = process.env.TWITTER_SESSION_FILE ?? null
-
 /**
  * Maximum age (days) of Twitter bookmarks to ingest.
  * Bookmarks older than this are skipped. Default: 365 (1 year).
@@ -88,6 +85,6 @@ export const config = {
   KB_DIR, STATE_DIR, CLAUDE_BIN,
   WEB_CLIP_DIR,
   APPLE_NOTES_FOLDER,
-  TWITTER_SESSION_FILE, TWITTER_MAX_AGE_DAYS,
+  TWITTER_MAX_AGE_DAYS,
   USER_CONTEXT,
 }

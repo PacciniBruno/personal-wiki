@@ -1,30 +1,34 @@
 /**
- * sources/twitter/index.js — Twitter/X bookmarks adapter (placeholder).
+ * sources/twitter/index.js — Twitter/X bookmarks adapter.
  *
- * Config (in .env):
- *   TWITTER_SESSION_FILE — path to a captured Twitter auth cookie/token file
- *                          (not yet implemented — set to enable this source)
- *
- * Implementation notes:
- * - Twitter's bookmarks endpoint: GET https://twitter.com/i/api/graphql/.../Bookmarks
- * - Auth: Bearer token + ct0 (CSRF) cookie, captured similarly to LinkedIn Voyager.
- * - Age filter: only ingest bookmarks saved within TWITTER_MAX_AGE_DAYS (default: 365).
- * - supportsRemovedDetection: false — Twitter doesn't surface an easy full-scan endpoint.
+ * Uses Puppeteer to capture the Bookmarks GraphQL session, then paginates
+ * via native fetch. Age filter: only imports bookmarks from the last
+ * TWITTER_MAX_AGE_DAYS days (default: 365).
  */
 
+import { getTwitterSession }  from './session.js'
+import { fetchAllBookmarks }  from './parser.js'
 import { TWITTER_MAX_AGE_DAYS } from '../../config.js'
 
 export const source = {
   id:    'twitter',
   label: 'Twitter/X',
-  defaultModes: ['sync'],
+  defaultModes: ['sync', 'bootstrap'],
   supportsRemovedDetection: false,
 
-  isEnabled(config) {
-    return Boolean(config.TWITTER_SESSION_FILE)
+  isEnabled(_config) {
+    return true // always available; session stored in STATE_DIR/twitter-session/
   },
 
   async fetch({ mode, state, knownKeys }) {
-    throw new Error('Twitter adapter is not yet implemented.')
+    console.log('\n① Opening Twitter/X...')
+    const session = await getTwitterSession()
+
+    console.log('\n② Fetching bookmarks...')
+    return fetchAllBookmarks(session, {
+      onlyNew:    mode !== 'bootstrap',
+      knownKeys,
+      maxAgeDays: TWITTER_MAX_AGE_DAYS,
+    })
   },
 }
