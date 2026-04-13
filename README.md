@@ -16,14 +16,14 @@ Two-layer knowledge base at `~/knowledge/` (configurable):
 
 ## Sources
 
-| Source | How to save | Status |
-|--------|-------------|--------|
-| **LinkedIn** | Native saved posts | Supported |
-| **Obsidian** | Web Clipper → tag with `#wiki` | Supported |
-| **Apple Notes** | iPhone Share → "Saved Notes" folder | Supported |
-| **Twitter/X** | Saved posts | Planned |
+| Source | How to save | Notes |
+|--------|-------------|-------|
+| **LinkedIn** | Native saved posts | Always enabled |
+| **Twitter/X** | Native bookmarks | Always enabled; first run opens Chrome for login |
+| **Apple Notes** | iPhone Share → Notes → your folder | Enable via `APPLE_NOTES_FOLDER` in `.env` |
+| **Web clips** | Browser → Obsidian Web Clipper → `chrome-clipped/` | Always enabled; silent if folder is empty |
 
-Sources are opt-in: if a source is not configured, it is silently skipped.
+Sources are opt-in where noted: if a source is not configured, it is silently skipped.
 
 ## Requirements
 
@@ -61,15 +61,18 @@ STATE_DIR=~/.personal-wiki  # state & Chrome session
 CLAUDE_BIN=claude           # path to claude CLI (auto-detected)
 ```
 
-**Sources** (disabled if not set):
+**Sources** (optional):
 
 ```env
-# Obsidian
-OBSIDIAN_VAULT=/path/to/your/vault
-OBSIDIAN_SYNC_TAG=wiki        # tag that marks a note for ingestion
+# Apple Notes — folder to scan on macOS. Source is skipped if not set.
+APPLE_NOTES_FOLDER=Saved Posts
 
-# Apple Notes
-APPLE_NOTES_FOLDER=Saved Notes
+# Web clips drop folder — where Obsidian Web Clipper saves .md files.
+# Defaults to $KB_DIR/chrome-clipped. Set to 'false' to disable.
+# WEB_CLIP_DIR=/path/to/custom/folder
+
+# Twitter bookmarks older than this many days are skipped (default: 365)
+# TWITTER_MAX_AGE_DAYS=365
 ```
 
 **Personalization:**
@@ -96,25 +99,48 @@ DEBUG=1 npm run sync      # Verbose: log all Voyager URLs, save debug JSON files
 
 ### LinkedIn
 
-No configuration needed beyond the API key. On first run, Chrome opens and prompts you to log in. The session is persisted — you only need to log in once.
+No configuration needed beyond the API key. On first run, Chrome opens and prompts you to log in. The session is persisted in `$STATE_DIR/chrome-session/` — you only need to log in once.
 
-### Obsidian
+### Twitter/X
 
-1. Install the [Obsidian Web Clipper](https://obsidian.md/clipper) Chrome extension
-2. Set `OBSIDIAN_VAULT` in `.env` to your vault path
-3. Tag any note with `#wiki` (or your custom `OBSIDIAN_SYNC_TAG`) to include it in the next sync
+No configuration needed. On first run, Chrome opens and navigates to your bookmarks page. If redirected to login, sign in with your **email and password** (not Google OAuth — Puppeteer's Chromium can't complete the Google OAuth flow). Session is persisted in `$STATE_DIR/twitter-session/`.
 
-After syncing, the tag is replaced with `#wiki-synced` so it won't be re-processed.
+### Apple Notes (macOS only)
 
-### Apple Notes
+1. Set `APPLE_NOTES_FOLDER` in `.env` to the name of your Notes folder (e.g. `Saved Posts`)
+2. On iPhone: **Share → Notes** → save to that folder
 
-On iPhone: **Share → Notes** → save to the folder named in `APPLE_NOTES_FOLDER` (default: `Saved Notes`).
+The sync reads that folder via AppleScript, extracts URLs from each note body, fetches the full article content, and ingests it. Notes are moved to a `"[folder] Processed"` sub-folder after processing.
 
-The sync pipeline reads that folder via AppleScript, extracts URLs from each note, fetches the article content, and ingests it. Notes are moved out of the folder after processing.
+### Web clips (Obsidian Web Clipper)
+
+1. Install the [Obsidian Web Clipper](https://obsidian.md/clipper) browser extension
+2. Configure it to save clips to `$KB_DIR/chrome-clipped/` (default: `~/knowledge/chrome-clipped/`)
+
+The sync reads `.md` files from that folder, parses their frontmatter (title, url, author, date), and ingests the content. Files are moved to `chrome-clipped/processed/` after ingestion.
 
 ## Automation (macOS)
 
-Two launchd agents run the pipeline automatically — copy and configure the templates in `scripts/`:
+Two launchd agents keep your knowledge base up to date without any manual intervention.
+
+### What runs when
+
+**Daily** (`personal-wiki-sync`) — runs once on the first Mac wake-up of the day:
+
+1. Fetches new posts from all configured sources
+2. Categorizes each item with Claude Haiku
+3. Appends to `raw/{category}.md`
+4. Re-synthesizes only the wiki pages for categories that received new content (runs `claude -p` per category in parallel)
+
+**Weekly** (`personal-wiki-synthesis`, Sunday) — runs once on the first wake of the week:
+
+1. Reads all `wiki/*.md` pages
+2. Identifies cross-domain patterns, tensions, and emerging signals
+3. Rewrites `synthesis.md` — the 10,000ft view of your entire knowledge base
+
+The daily guard stamps `$STATE_DIR/last-sync-date` and the weekly guard stamps `$STATE_DIR/last-synthesis-week`, so a failed run retries on the next wake rather than being skipped for the whole day/week.
+
+### Setup
 
 ```bash
 # 1. Copy templates
@@ -131,11 +157,6 @@ cp scripts/com.YOUR_USERNAME.personal-wiki-synthesis.plist.template \
 launchctl load ~/Library/LaunchAgents/com.YOUR_USERNAME.personal-wiki-sync.plist
 launchctl load ~/Library/LaunchAgents/com.YOUR_USERNAME.personal-wiki-synthesis.plist
 ```
-
-| Agent | Schedule | What it does |
-|-------|----------|-------------|
-| `personal-wiki-sync` | Daily (first wake) | Sync all sources + tier-1 wiki update |
-| `personal-wiki-synthesis` | Weekly Sunday | Cross-domain synthesis → `synthesis.md` |
 
 Logs: `~/Library/Logs/personal-wiki-sync.log` and `personal-wiki-synthesis.log`.
 
@@ -170,34 +191,54 @@ Saves `debug-first-response.json` and `debug-all-voyager.json` in the project ro
 
 ## State
 
-`~/.personal-wiki/state.json` (or `$STATE_DIR/state.json`) stores:
-- `knownKeys` — all post URLs/URNs already ingested (for dedup and sync stopping)
+`~/.personal-wiki/state.json` (or `$STATE_DIR/state.json`) tracks per-source dedup keys and last-sync timestamps:
 
-`~/.personal-wiki/chrome-session/` — Puppeteer Chrome profile. LinkedIn session persists here.
+```json
+{
+  "version": 2,
+  "sources": {
+    "linkedin":    { "knownKeys": ["..."], "lastSyncAt": "2026-04-13T..." },
+    "twitter":     { "knownKeys": ["..."], "lastSyncAt": "2026-04-13T..." },
+    "apple-notes": { "knownKeys": ["..."], "lastSyncAt": "2026-04-13T..." },
+    "web":         { "knownKeys": ["..."], "lastSyncAt": "2026-04-13T..." }
+  }
+}
+```
+
+`~/.personal-wiki/chrome-session/` — Puppeteer Chrome profile for LinkedIn (session persists here).  
+`~/.personal-wiki/twitter-session/` — Puppeteer Chrome profile for Twitter/X.
 
 ## Architecture
 
 ```
 src/
-  config.js      Central config — all paths and feature flags, reads from .env
-  index.js       CLI orchestrator (--mode=bootstrap|sync)
+  config.js        Central config — all paths and feature flags, reads from .env
+  index.js         CLI orchestrator (--mode=bootstrap|sync, --source=...)
   sources/
+    types.js         SourceItem and SourceAdapter JSDoc contracts
+    index.js         Adapter registry — add new sources here
     linkedin/
-      session.js   Puppeteer + LinkedIn Voyager API interception
-      parser.js    Response parsing → normalized SourceItems
-      index.js     Adapter (implements SourceAdapter contract)
-    twitter/       Placeholder adapter
-    apple-notes/   Placeholder adapter
-    web/           Placeholder adapter (Obsidian Web Clipper)
+      session.js     Puppeteer + LinkedIn Voyager API interception
+      parser.js      Response parsing → normalized SourceItems
+      index.js       Adapter
+    twitter/
+      session.js     Puppeteer + Twitter Bookmarks GraphQL interception
+      parser.js      Cursor-based pagination + tweet parsing
+      index.js       Adapter
+    apple-notes/
+      index.js       AppleScript → URL extraction → article fetch → SourceItems
+    web/
+      index.js       Drop-folder reader for Obsidian Web Clipper .md files
   pipeline/
-    ingest.js      fetch → filter → categorize → write → state update
-    dedupe.js      Source-aware dedup helpers
-    filters.js     Age and known-key filters
-  categorize.js  Claude Haiku — category, subcategory, tags, summary per item
-  writer.js      Appends entries to raw/, updates index.md, appends to log.md
-  synthesize.js  Two-tier wiki synthesis via claude -p
-  state.js       Loads/saves state.json
-  init-kb.js     Creates ~/knowledge/ structure (idempotent)
+    ingest.js        fetch → dedup → categorize → write → state update
+    dedupe.js        Source-aware knownKeys helpers
+    filters.js       filterKnown (belt-and-suspenders dedup)
+    fetch-article.js Shared Readability + jsdom article extractor
+  categorize.js    Claude Haiku — category, subcategory, tags, summary per item
+  writer.js        Appends to raw/, updates index.md, appends to log.md
+  synthesize.js    Two-tier wiki synthesis via claude -p
+  state.js         Loads/saves state.json (v2 schema, v1 migration included)
+  init-kb.js       Creates ~/knowledge/ structure (idempotent)
 ```
 
 ## Security notes
