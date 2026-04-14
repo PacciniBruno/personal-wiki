@@ -109,35 +109,32 @@ Logs: `~/Library/Logs/personal-wiki-sync.log` and `personal-wiki-synthesis.log`.
 
 ## Using with Claude
 
+The `skills/kb/` directory in this repo is a Claude skill. It tells Claude about your knowledge base and when to search it — the description is always in context, the full instructions only load when it searches.
+
 ### Claude Code
 
-Add `~/.claude/skills/kb.md`. The description is always loaded into context — Claude knows when to search; the full instructions only load when it actually does.
-
-```markdown
----
-name: kb
-description: Search personal knowledge base — LinkedIn, Twitter, Apple Notes, web clips synthesized by Claude. Use proactively when conversation touches startups, AI, product, investing, leadership, marketing, career, mindset, or sales.
----
-
-Knowledge base at `~/knowledge/`:
-- `wiki/` — synthesized pages by topic (start here)
-- `raw/`  — source posts with original URLs
-- `synthesis.md` — cross-domain patterns
-
-Search with Grep across `~/knowledge/wiki/` or `~/knowledge/raw/`. Cite source URLs from `**Link:**` fields. Skip `[REMOVED]` entries.
+```bash
+cp -r skills/kb ~/.claude/skills/kb
 ```
 
-Claude will search your knowledge base automatically when relevant topics come up, without you needing to ask.
+Claude will search your knowledge base automatically when relevant topics come up.
 
-### Claude Cowork (Desktop app)
+### Claude Desktop / Cowork
 
-[Claude Cowork](https://support.claude.com/en/articles/13345190-get-started-with-claude-cowork) is the Claude Desktop app's agent mode — local file access, no terminal required.
+[Claude Cowork](https://support.claude.com/en/articles/13345190-get-started-with-claude-cowork) is the Claude Desktop agent mode — local file access, no terminal required. Skills work here too.
 
-1. Install [Claude Desktop](https://claude.ai/download)
-2. Open Cowork and grant it access to `~/knowledge/`
-3. Ask questions directly — Cowork reads your wiki pages and raw posts live, same as Claude Code
+1. Install [Claude Desktop](https://claude.ai/download) (Pro, Max, Team, or Enterprise)
+2. Go to [claude.ai](https://claude.ai) → **Customize → Skills → Upload**
+3. Zip the `skills/kb/` directory and upload it
 
-Good alternative if you're not in a coding environment or prefer a GUI. Requires a Pro, Max, Team, or Enterprise plan.
+```bash
+cd skills && zip -r kb.zip kb/ && open .   # zip it, then upload kb.zip on claude.ai
+```
+
+4. Grant Cowork access to `~/knowledge/` when prompted
+5. Ask questions — Cowork reads your wiki pages and raw posts live
+
+Note: Claude Desktop and Claude Code store skills separately. Install in both places if you use both.
 
 ## Commands
 
