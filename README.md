@@ -18,6 +18,24 @@ The minimal setup is LinkedIn. Twitter, Apple Notes, and web clips are optional 
 
 Ten topics: AI & Technology, Startup & Entrepreneurship, Product & UX, Marketing & Growth, Leadership & Management, Investing & Finance, Career & Work, Sales & Business Dev, Mindset & Personal Dev, Other.
 
+## What it's like to use
+
+Once a few weeks of posts are in, you can have conversations like these — in Claude Code or claude.ai:
+
+> *"I'm rethinking our pricing model. What have I read on this?"*
+
+Claude searches your knowledge base, finds posts on outcome-based pricing from sales, product, and VC angles, and synthesizes the through-lines — with source links so you can go back to the originals.
+
+> *"Brief me on what I've been saving about AI agents this month."*
+
+Claude reads your `wiki/ai-technology.md` and `synthesis.md`, filters for recent signal, and gives you a 5-minute briefing grounded in your actual reading, not the internet at large.
+
+> *"What do the people I follow think about hiring in a downturn?"*
+
+Claude cross-references leadership and startup posts, surfaces the tensions — founders who say hire slow vs. those who doubled down — and tells you who said what.
+
+The knowledge base reflects *your* curation, not an algorithm's. The signal-to-noise ratio depends on what you choose to save.
+
 ## Requirements
 
 - macOS (automation uses launchd; sync and KB work on any OS)
@@ -93,9 +111,11 @@ Installs two launchd agents that run on every wake from sleep:
 
 Logs: `~/Library/Logs/personal-wiki-sync.log` and `personal-wiki-synthesis.log`.
 
-## Claude Code integration
+## Using with Claude
 
-Add `~/.claude/skills/kb.md` to make Claude search your knowledge base automatically during conversations:
+### Claude Code
+
+Add `~/.claude/skills/kb.md`. The description is always loaded into context — Claude knows when to search; the full instructions only load when it actually does.
 
 ```markdown
 ---
@@ -110,6 +130,16 @@ Knowledge base at `~/knowledge/`:
 
 Search with Grep across `~/knowledge/wiki/` or `~/knowledge/raw/`. Cite source URLs from `**Link:**` fields. Skip `[REMOVED]` entries.
 ```
+
+Claude will search your knowledge base automatically when relevant topics come up, without you needing to ask.
+
+### Claude.ai (Projects)
+
+1. Go to [claude.ai](https://claude.ai) → **Projects** → create a project for your knowledge base
+2. Add files: drag in `~/knowledge/synthesis.md` and whichever `wiki/*.md` pages you want in scope
+3. Add a project instruction like: *"When I ask about professional topics, reference the knowledge base files I've added before answering."*
+
+Unlike Claude Code, claude.ai Projects don't have file access — you upload snapshots. Re-upload the relevant wiki pages after a sync if you want fresh content. Good for mobile or when you're not in a coding environment.
 
 ## Commands
 
