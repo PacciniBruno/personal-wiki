@@ -4,6 +4,7 @@
   "description": "AI-powered personal knowledge base fed by LinkedIn, Obsidian, Apple Notes, and more",
   "type": "module",
   "scripts": {
+    "setup": "bash scripts/setup.sh",
     "bootstrap": "node src/index.js --mode=bootstrap",
     "sync": "node src/index.js --mode=sync",
     "init-kb": "node src/init-kb.js",

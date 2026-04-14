@@ -41,6 +41,7 @@ npm install
 cp .env.example .env
 # Edit .env — at minimum, set ANTHROPIC_API_KEY
 npm run init-kb    # Creates ~/knowledge/ structure (run once)
+npm run setup      # Installs launchd automation (macOS, run once)
 ```
 
 ### Connect the knowledge base to Claude Code
@@ -182,20 +183,10 @@ The daily guard stamps `$STATE_DIR/last-sync-date` and the weekly guard stamps `
 ### Setup
 
 ```bash
-# 1. Copy templates
-cp scripts/com.YOUR_USERNAME.personal-wiki-sync.plist.template \
-   ~/Library/LaunchAgents/com.YOUR_USERNAME.personal-wiki-sync.plist
-
-cp scripts/com.YOUR_USERNAME.personal-wiki-synthesis.plist.template \
-   ~/Library/LaunchAgents/com.YOUR_USERNAME.personal-wiki-synthesis.plist
-
-# 2. Edit both copies — replace YOUR_USERNAME, YOUR_NODE_PATH, YOUR_PROJECT_PATH
-#    Run `whoami`, `which node`, `pwd` to get the right values.
-
-# 3. Load the agents
-launchctl load ~/Library/LaunchAgents/com.YOUR_USERNAME.personal-wiki-sync.plist
-launchctl load ~/Library/LaunchAgents/com.YOUR_USERNAME.personal-wiki-synthesis.plist
+npm run setup
 ```
+
+Detects your username, Node path, and project path automatically — generates and loads both agents in one step.
 
 Logs: `~/Library/Logs/personal-wiki-sync.log` and `personal-wiki-synthesis.log`.
 
