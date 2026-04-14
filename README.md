@@ -124,17 +124,11 @@ Claude will search your knowledge base automatically when relevant topics come u
 [Claude Cowork](https://support.claude.com/en/articles/13345190-get-started-with-claude-cowork) is the Claude Desktop agent mode — local file access, no terminal required. Skills work here too.
 
 1. Install [Claude Desktop](https://claude.ai/download) (Pro, Max, Team, or Enterprise)
-2. Go to [claude.ai](https://claude.ai) → **Customize → Skills → Upload**
-3. Zip the `skills/kb/` directory and upload it
-
-```bash
-cd skills && zip -r kb.zip kb/ && open .   # zip it, then upload kb.zip on claude.ai
-```
-
+2. Go to [claude.ai](https://claude.ai) → **Customize → Skills → Create**
+3. Copy-paste the contents of [`skills/kb/SKILL.md`](skills/kb/SKILL.md)
 4. Grant Cowork access to `~/knowledge/` when prompted
-5. Ask questions — Cowork reads your wiki pages and raw posts live
 
-Note: Claude Desktop and Claude Code store skills separately. Install in both places if you use both.
+Note: Claude Desktop and Claude Code store skills separately — install in both if you use both.
 
 ## Commands
 
