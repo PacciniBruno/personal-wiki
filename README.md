@@ -28,9 +28,9 @@ Sources are opt-in where noted: if a source is not configured, it is silently sk
 ## Requirements
 
 - Node.js 18+
-- [Claude Code CLI](https://claude.ai/code) (`npm install -g @anthropic-ai/sdk`)
-- An [Anthropic API key](https://console.anthropic.com)
-- Chrome (for LinkedIn scraping via Puppeteer)
+- An [Anthropic API key](https://console.anthropic.com) — for categorization (Claude Haiku)
+- Chrome — for LinkedIn and Twitter scraping via Puppeteer
+- [Claude Code CLI](https://claude.ai/code) — **only for wiki synthesis** (`synthesize.js` calls `claude -p`). If you skip synthesis, you don't need it — the sync pipeline and raw knowledge base work without it.
 
 ## Setup
 
