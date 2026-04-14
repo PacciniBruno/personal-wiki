@@ -30,11 +30,7 @@ Claude searches your knowledge base, finds posts on outcome-based pricing from s
 
 Claude reads your `wiki/ai-technology.md` and `synthesis.md`, filters for recent signal, and gives you a 5-minute briefing grounded in your actual reading, not the internet at large.
 
-> *"What do the people I follow think about hiring in a downturn?"*
-
-Claude cross-references leadership and startup posts, surfaces the tensions — founders who say hire slow vs. those who doubled down — and tells you who said what.
-
-The knowledge base reflects *your* curation, not an algorithm's. The signal-to-noise ratio depends on what you choose to save.
+The knowledge base reflects *your* curation. The signal-to-noise ratio depends on what you choose to save.
 
 ## Requirements
 
@@ -133,13 +129,15 @@ Search with Grep across `~/knowledge/wiki/` or `~/knowledge/raw/`. Cite source U
 
 Claude will search your knowledge base automatically when relevant topics come up, without you needing to ask.
 
-### Claude.ai (Projects)
+### Claude Cowork (Desktop app)
 
-1. Go to [claude.ai](https://claude.ai) → **Projects** → create a project for your knowledge base
-2. Add files: drag in `~/knowledge/synthesis.md` and whichever `wiki/*.md` pages you want in scope
-3. Add a project instruction like: *"When I ask about professional topics, reference the knowledge base files I've added before answering."*
+[Claude Cowork](https://support.claude.com/en/articles/13345190-get-started-with-claude-cowork) is the Claude Desktop app's agent mode — local file access, no terminal required.
 
-Unlike Claude Code, claude.ai Projects don't have file access — you upload snapshots. Re-upload the relevant wiki pages after a sync if you want fresh content. Good for mobile or when you're not in a coding environment.
+1. Install [Claude Desktop](https://claude.ai/download)
+2. Open Cowork and grant it access to `~/knowledge/`
+3. Ask questions directly — Cowork reads your wiki pages and raw posts live, same as Claude Code
+
+Good alternative if you're not in a coding environment or prefer a GUI. Requires a Pro, Max, Team, or Enterprise plan.
 
 ## Commands
 
