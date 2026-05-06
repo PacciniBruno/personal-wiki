@@ -96,7 +96,7 @@ export function extractPaging(body) {
 
 // ─── URL builder ──────────────────────────────────────────────────────────────
 
-function buildPaginatedUrl(rawUrl, start, count, paginationToken = null) {
+export function buildPaginatedUrl(rawUrl, start, count, paginationToken = null) {
   const qIdx = rawUrl.indexOf('?')
   if (qIdx === -1) {
     const suffix = paginationToken ? `&paginationToken=${paginationToken}` : ''

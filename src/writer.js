@@ -18,7 +18,10 @@ function formatEntry(post) {
   const date   = formatDate(post.savedAt ?? post.createdAt ?? new Date().toISOString())
   const author = post.author?.trim() || 'Unknown'
   const tags   = post.tags?.length ? post.tags.join(', ') : ''
-  const text   = (post.text ?? '').trim().slice(0, 1500)
+  // Short posts (LinkedIn, etc.) keep the 1500-char cap; fetched articles and
+  // prose notes get the full upstream cap (~5000) so kb has real text to read.
+  const limit  = post.sourceType === 'social-post' ? 1500 : 5000
+  const text   = (post.text ?? '').trim().slice(0, limit)
   const insight = (post.summary ?? '').trim()
 
   const lines = []
