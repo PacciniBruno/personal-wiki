@@ -17,40 +17,12 @@
  *   node src/synthesize.js --tier=2
  */
 
-import { spawn } from 'child_process'
 import { join } from 'path'
 import { CATEGORIES, KB_DIR } from './init-kb.js'
 import { rawFilePath, wikiFilePath } from './writer.js'
-import { CLAUDE_BIN } from './config.js'
-
-
-// Spawns claude -p with the prompt fed via stdin (avoids variadic --allowedTools eating the prompt arg)
-function claudePrint(prompt, timeoutMs) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(CLAUDE_BIN, [
-      '--print',
-      '--dangerously-skip-permissions',
-      '--allowedTools', ALLOWED_TOOLS,
-    ], { timeout: timeoutMs })
-
-    let stdout = ''
-    let stderr = ''
-    child.stdout.on('data', d => { stdout += d })
-    child.stderr.on('data', d => { stderr += d })
-    child.on('close', code => {
-      if (code === 0) resolve(stdout)
-      else reject(new Error(stderr.trim() || `exit code ${code}`))
-    })
-    child.on('error', reject)
-
-    child.stdin.write(prompt)
-    child.stdin.end()
-  })
-}
-
+import { claudePrint } from './claude-print.js'
 
 const SYNTHESIS_FILE = join(KB_DIR, 'synthesis.md')
-const ALLOWED_TOOLS  = 'Read Write Glob Grep Bash'
 
 // ─── Prompt builders ─────────────────────────────────────────────────────────
 

@@ -15,7 +15,10 @@ NODE="$(command -v node)"
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 cd "$DIR"
-"$NODE" src/index.js --mode=sync && "$NODE" src/synthesize.js --tier=1
+"$NODE" src/index.js --mode=sync --source=linkedin,web,apple-notes \
+  && "$NODE" src/synthesize.js --tier=1 \
+  && "$NODE" src/synthesize-projects.js \
+  || exit 1
 
 # Write stamp after success so a failure retries on next wake
 mkdir -p "$STATE_DIR"

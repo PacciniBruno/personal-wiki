@@ -2,30 +2,37 @@
  * sources/apple-notes/index.js — Apple Notes saved-links adapter.
  *
  * Reads notes from a designated Apple Notes folder (APPLE_NOTES_FOLDER),
- * extracts URLs from each note body, fetches the article content at each URL,
- * and returns normalized SourceItems.
+ * then for each note:
+ *   1. Extracts URLs from the body, fetches their article content.
+ *   2. Detects PDF attachments (e.g. email prints from mobile), finds the
+ *      files in the Notes Group Container, and extracts their text.
  *
  * After processing, notes are moved to an "[APPLE_NOTES_FOLDER] Processed"
  * sub-folder so the inbox stays clean.
  *
  * Workflow:
  *   iPhone: Any app → Share → Notes → save to APPLE_NOTES_FOLDER
- *   Pipeline: osascript reads folder → extract URLs → fetch article → ingest
+ *   Pipeline: osascript reads folder → extract URLs + PDFs → ingest
  *
  * Config (in .env):
  *   APPLE_NOTES_FOLDER — folder name to scan. Source disabled if not set.
  */
 
-import { execSync } from 'child_process'
+import { execSync }  from 'child_process'
+import { readFile }  from 'fs/promises'
+import { join }      from 'path'
+import { homedir }   from 'os'
 import { APPLE_NOTES_FOLDER } from '../../config.js'
-import { fetchArticle } from '../../pipeline/fetch-article.js'
+import { fetchArticle }       from '../../pipeline/fetch-article.js'
+import { extractPdfText }     from '../../pipeline/extract-pdf.js'
 
 // ─── AppleScript helpers ──────────────────────────────────────────────────────
 
 function runScript(script) {
   return execSync(`osascript -e '${script.replace(/'/g, "'\\''")}'`, {
-    encoding: 'utf8',
-    timeout: 30_000,
+    encoding:  'utf8',
+    timeout:   60_000,
+    maxBuffer: 256 * 1024 * 1024, // 256 MB — note bodies can include large HTML
   }).trim()
 }
 
@@ -70,6 +77,33 @@ function readNotesFromFolder(folder) {
   } catch (err) {
     console.error(`   osascript error: ${err.message}`)
     return ''
+  }
+}
+
+/**
+ * Returns the names of any PDF attachments on the given note.
+ */
+function getPdfAttachments(noteId) {
+  const script = `
+    tell application "Notes"
+      set output to ""
+      try
+        set theNote to note id "${noteId.replace(/"/g, '\\"')}"
+        repeat with att in (every attachment of theNote)
+          set n to name of att
+          if n ends with ".pdf" or n ends with ".PDF" then
+            set output to output & n & linefeed
+          end if
+        end repeat
+      end try
+      return output
+    end tell`
+
+  try {
+    const result = runScript(script)
+    return result.split('\n').filter(n => n.trim() !== '')
+  } catch {
+    return []
   }
 }
 
@@ -131,6 +165,48 @@ function extractUrls(html) {
   )]
 }
 
+// ─── HTML → plain text (for prose-only notes) ────────────────────────────────
+
+const PROSE_MIN_CHARS = 200
+
+function stripHtml(html) {
+  return (html ?? '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n\n')
+    .replace(/<\/(div|li|h[1-6])>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n[ \t]+/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+// ─── PDF helpers ─────────────────────────────────────────────────────────────
+
+/**
+ * Searches the Notes Group Container for a PDF with the given filename.
+ * Returns the first (newest-modified) match, or null if not found.
+ */
+function findPdfInNotesStorage(filename) {
+  const notesBase = join(homedir(), 'Library/Group Containers/group.com.apple.notes')
+  const safeName  = filename.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+  try {
+    const result = execSync(
+      `find "${notesBase}" -type f -name "${safeName}" 2>/dev/null | head -1`,
+      { encoding: 'utf8', timeout: 15_000 }
+    ).trim()
+    return result || null
+  } catch {
+    return null
+  }
+}
+
 // ─── Adapter ──────────────────────────────────────────────────────────────────
 
 export const source = {
@@ -164,20 +240,30 @@ export const source = {
       const parts = block.slice(0, endIdx).split('|||')
       if (parts.length < 4) continue
 
-      const [noteId, title, created, ...bodyParts] = parts
-      const body = bodyParts.join('|||')
+      const [rawNoteId, rawTitle, created, ...bodyParts] = parts
+      const body          = bodyParts.join('|||')
+      const noteId        = rawNoteId.trim()
+      const trimmedTitle  = rawTitle.trim()
+      const savedAt       = created ? new Date(created).toISOString() : new Date().toISOString()
 
-      const urls = extractUrls(body)
-      if (urls.length === 0) {
-        console.log(`   Note "${title.trim()}" has no URLs — skipping.`)
-        await moveNoteToProcessed(noteId.trim(), folder)
-        continue
-      }
+      const urls     = extractUrls(body)
+      const pdfNames = getPdfAttachments(noteId)
 
+      // Per-note bookkeeping: only move to Processed if we ingested something
+      // OR the note was truly empty. A note where every URL/PDF failed stays
+      // in the inbox so transient failures retry on the next run.
+      let ingestedAnyItem = false
+      let attemptedAnyItem = false
+
+      // ── URLs ────────────────────────────────────────────────────────────────
       for (const url of urls) {
         const externalId = url
-        if (knownKeys.has(externalId)) continue
+        if (knownKeys.has(externalId)) {
+          ingestedAnyItem = true // already in KB; treat as success for move purposes
+          continue
+        }
 
+        attemptedAnyItem = true
         process.stdout.write(`\n   Fetching: ${url.slice(0, 70)}...`)
         const article = await fetchArticle(url)
 
@@ -193,24 +279,112 @@ export const source = {
           externalId,
           uniqueKey:   `apple-notes:${externalId}`,
           url,
-          title:       article.title || title.trim(),
+          title:       article.title || trimmedTitle,
           text:        article.text,
           author:      article.author,
           authorTitle: article.excerpt,
-          savedAt:     created ? new Date(created).toISOString() : new Date().toISOString(),
+          savedAt,
           createdAt:   null,
           publishedAt: null,
           tags:        [],
-          metadata:    { noteId: noteId.trim(), noteTitle: title.trim() },
+          metadata:    { noteId, noteTitle: trimmedTitle },
         })
+        ingestedAnyItem = true
       }
 
-      // Move note to processed regardless of URL fetch success
-      await moveNoteToProcessed(noteId.trim(), folder)
+      // ── PDF attachments ─────────────────────────────────────────────────────
+      for (const pdfName of pdfNames) {
+        // Stable dedup key: note ID + filename (note IDs are stable in Notes)
+        const externalId = `pdf:${noteId}:${pdfName}`
+        if (knownKeys.has(externalId)) {
+          ingestedAnyItem = true
+          continue
+        }
+
+        attemptedAnyItem = true
+        process.stdout.write(`\n   Reading PDF: ${pdfName}...`)
+
+        const pdfPath = findPdfInNotesStorage(pdfName)
+        if (!pdfPath) {
+          console.log(` ⚠️  File not found in Notes storage`)
+          continue
+        }
+
+        let text = null
+        try {
+          const buffer = await readFile(pdfPath)
+          text = await extractPdfText(buffer)
+        } catch {
+          // fall through
+        }
+
+        if (!text) {
+          console.log(` ⚠️  Could not extract text`)
+          continue
+        }
+
+        console.log(` ✅`)
+        items.push({
+          source:      'apple-notes',
+          sourceType:  'article',
+          externalId,
+          uniqueKey:   `apple-notes:${externalId}`,
+          url:         null,
+          title:       pdfName.replace(/\.pdf$/i, '').trim() || trimmedTitle,
+          text,
+          author:      '',
+          authorTitle: '',
+          savedAt,
+          createdAt:   null,
+          publishedAt: null,
+          tags:        [],
+          metadata:    { noteId, noteTitle: trimmedTitle, pdfFile: pdfName },
+        })
+        ingestedAnyItem = true
+      }
+
+      // ── Plain-prose fallback (no URLs, no PDFs) ─────────────────────────────
+      let noteWasEmpty = false
+      if (urls.length === 0 && pdfNames.length === 0) {
+        const proseText  = stripHtml(body)
+        const externalId = `note:${noteId}`
+
+        if (knownKeys.has(externalId)) {
+          ingestedAnyItem = true
+        } else if (proseText.length >= PROSE_MIN_CHARS) {
+          items.push({
+            source:      'apple-notes',
+            sourceType:  'note',
+            externalId,
+            uniqueKey:   `apple-notes:${externalId}`,
+            url:         null,
+            title:       trimmedTitle || 'Untitled note',
+            text:        proseText,
+            author:      '',
+            authorTitle: '',
+            savedAt,
+            createdAt:   null,
+            publishedAt: null,
+            tags:        [],
+            metadata:    { noteId, noteTitle: trimmedTitle },
+          })
+          ingestedAnyItem = true
+          console.log(`   Note "${trimmedTitle}" ingested as prose (${proseText.length} chars).`)
+        } else {
+          noteWasEmpty = true
+          console.log(`   Note "${trimmedTitle}" has no URLs, PDFs, or substantial prose — skipping.`)
+        }
+      }
+
+      if (ingestedAnyItem || noteWasEmpty) {
+        await moveNoteToProcessed(noteId, folder)
+      } else if (attemptedAnyItem) {
+        console.log(`   Note "${trimmedTitle}" had failures — leaving in inbox for retry.`)
+      }
     }
 
     if (items.length > 0) {
-      console.log(`\n✅ ${items.length} article(s) ingested from Apple Notes "${folder}"`)
+      console.log(`\n✅ ${items.length} item(s) ingested from Apple Notes "${folder}"`)
     }
 
     return items

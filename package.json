@@ -9,13 +9,15 @@
     "sync": "node src/index.js --mode=sync",
     "init-kb": "node src/init-kb.js",
     "update-wiki": "node src/synthesize.js --tier=1",
-    "update-wiki:cross": "node src/synthesize.js --tier=2"
+    "update-wiki:cross": "node src/synthesize.js --tier=2",
+    "update-projects": "node src/synthesize-projects.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
     "@mozilla/readability": "^0.6.0",
     "dotenv": "^16.4.5",
     "jsdom": "^29.0.2",
+    "pdf-parse": "^2.4.5",
     "puppeteer": "^22.12.1"
   }
 }

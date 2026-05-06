@@ -13,8 +13,10 @@ import { homedir } from 'os'
 import { KB_DIR } from './config.js'
 
 export { KB_DIR }
-export const RAW_DIR  = join(KB_DIR, 'raw')
-export const WIKI_DIR = join(KB_DIR, 'wiki')
+export const RAW_DIR       = join(KB_DIR, 'raw')
+export const WIKI_DIR      = join(KB_DIR, 'wiki')
+export const PROJECTS_DIR  = join(KB_DIR, 'projects')
+export const BRIEFINGS_DIR = join(KB_DIR, 'briefings')
 
 export const CATEGORIES = [
   { name: 'AI & Technology',            slug: 'ai-technology'            },
@@ -55,6 +57,7 @@ and other sources. It uses the two-layer wiki pattern:
 - \`raw/\`   — source material, one file per topic, append-only
 - \`wiki/\`  — LLM-synthesized knowledge pages, updated daily after each sync
 - \`synthesis.md\` — cross-domain patterns and helicopter view, updated weekly
+- \`projects/\` — per-project living docs (one folder per project; see \`projects/CLAUDE.md\`)
 
 ## How to search
 
@@ -113,6 +116,54 @@ const SYNTHESIS_MD = `# Cross-Domain Synthesis
 *Not yet seeded. Run \`npm run update-wiki -- --tier=2\` or wait for the weekly launchd job.*
 `
 
+const PROJECTS_CLAUDE_MD = `# Projects
+
+Each subfolder of \`projects/\` is one project — a sustained, time-bounded effort
+that pulls signal from the themed \`raw/\` files plus its own free-form notes.
+
+## Layout
+
+\`\`\`
+projects/{name}/
+  README.md   ← read this first. YAML frontmatter (themes, status, since) +
+                a human-readable description of the project's thesis.
+  wiki.md     ← the synthesized living doc. Rewritten daily by
+                src/synthesize-projects.js — current state at a glance.
+  *.md        ← free-form notes, meeting transcripts. You write these.
+  *.pdf       ← decks, attachments. You drop these.
+  *.pdf.txt   ← auto-generated text extracts of *.pdf. Don't edit by hand.
+\`\`\`
+
+## How to navigate this folder
+
+For a project's current state, read \`wiki.md\`.
+For the project's framing and intent, read \`README.md\`.
+For raw materials, read the \`*.md\` files (or \`grep\` across them).
+PDFs aren't readable directly — check the sibling \`*.pdf.txt\` instead.
+
+## Citing
+
+Project notes are first-person; cite by filename and date.
+Theme posts referenced inside \`wiki.md\` link out to \`~/knowledge/raw/{theme}.md\`
+entries — preserve the URLs from those entries' **Link:** field.
+
+## Adding a new project
+
+Create \`projects/{name}/README.md\` with frontmatter:
+
+\`\`\`yaml
+---
+name: name
+themes: [ai-technology, product-ux]   # any of the 10 themes from raw/
+status: exploring                      # exploring | active | archived
+since: YYYY-MM-DD
+---
+\`\`\`
+
+The next \`npm run update-projects\` (or daily sync) will create \`wiki.md\` and
+keep it fresh.
+`
+
 function rawHeader(category) {
   return `# ${category} — Raw Posts
 
@@ -137,15 +188,18 @@ export async function initKB() {
   console.log('\n📚 Initializing knowledge base...\n')
 
   // Create directories
-  await mkdir(RAW_DIR,  { recursive: true })
-  await mkdir(WIKI_DIR, { recursive: true })
+  await mkdir(RAW_DIR,       { recursive: true })
+  await mkdir(WIKI_DIR,      { recursive: true })
+  await mkdir(PROJECTS_DIR,  { recursive: true })
+  await mkdir(BRIEFINGS_DIR, { recursive: true })
   await mkdir(join(KB_DIR, 'chrome-clipped'), { recursive: true })
 
   // Root files
-  await writeIfMissing(join(KB_DIR, 'CLAUDE.md'),    CLAUDE_MD)
-  await writeIfMissing(join(KB_DIR, 'index.md'),     INDEX_MD)
-  await writeIfMissing(join(KB_DIR, 'log.md'),       LOG_MD)
-  await writeIfMissing(join(KB_DIR, 'synthesis.md'), SYNTHESIS_MD)
+  await writeIfMissing(join(KB_DIR, 'CLAUDE.md'),               CLAUDE_MD)
+  await writeIfMissing(join(KB_DIR, 'index.md'),                INDEX_MD)
+  await writeIfMissing(join(KB_DIR, 'log.md'),                  LOG_MD)
+  await writeIfMissing(join(KB_DIR, 'synthesis.md'),            SYNTHESIS_MD)
+  await writeIfMissing(join(PROJECTS_DIR, 'CLAUDE.md'),         PROJECTS_CLAUDE_MD)
 
   // Topic files
   for (const { name, slug } of CATEGORIES) {
