@@ -12,7 +12,8 @@
  * Source selection delegated to src/sources/index.js.
  */
 
-import 'dotenv/config'
+import { config as loadDotenv } from 'dotenv'
+loadDotenv({ override: true })
 import { KB_DIR, config }                    from './config.js'
 import { loadState, saveState }              from './state.js'
 import { runCategoryUpdates }                from './synthesize.js'

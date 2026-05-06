@@ -8,14 +8,15 @@
 
 import puppeteer from 'puppeteer'
 import { join } from 'path'
-import { mkdir, writeFile, access, cp } from 'fs/promises'
+import { mkdir, writeFile, readFile, access, cp } from 'fs/promises'
 import { homedir } from 'os'
 import { createInterface } from 'readline'
 import { STATE_DIR } from '../../config.js'
-import { extractElements, looksLikePost, extractPaging } from './parser.js'
+import { extractElements, looksLikePost, extractPaging, buildPaginatedUrl } from './parser.js'
 
 const SESSION_DIR     = join(STATE_DIR, 'chrome-session')
 const OLD_SESSION_DIR = join(homedir(), '.linkedin-notion-sync', 'chrome-session')
+const SESSION_CACHE   = join(STATE_DIR, 'linkedin-session.json')
 
 /**
  * One-time migration: copies the LinkedIn Chrome session from the old state
@@ -55,12 +56,58 @@ const EXCLUDE_URL_PATTERNS = [
 ]
 
 /**
+ * Tries to reuse a previously-captured session. Probes the cached endpoint with
+ * a small request; if it returns post-shaped data, returns a refreshed config
+ * (with a freshly-fetched firstBatch). Returns null on any failure so the
+ * caller falls back to Puppeteer.
+ */
+async function tryCachedSession() {
+  let cached
+  try {
+    cached = JSON.parse(await readFile(SESSION_CACHE, 'utf8'))
+  } catch {
+    return null
+  }
+  if (!cached?.endpoint || !cached?.headers) return null
+
+  try {
+    const url = buildPaginatedUrl(cached.endpoint, 0, cached.paging?.count ?? 10, null)
+    const res = await fetch(url, { headers: cached.headers })
+    if (!res.ok) return null
+    const body = await res.json()
+    const elements = extractElements(body)
+    if (!elements?.length || !elements.some(looksLikePost)) return null
+    return { ...cached, firstBatch: body, paging: extractPaging(body) }
+  } catch {
+    return null
+  }
+}
+
+async function persistCachedSession(config) {
+  const { firstBatch, ...slim } = config
+  try {
+    await writeFile(SESSION_CACHE, JSON.stringify(slim, null, 2))
+  } catch {
+    // best-effort — caching is an optimization, not required
+  }
+}
+
+/**
  * Launches Chrome, intercepts the LinkedIn Voyager API, and returns a session
  * config object that parser.js can use to paginate via native fetch().
+ *
+ * Fast path: if a previously-captured session is still alive, reuse it and skip
+ * the Puppeteer launch entirely.
  *
  * @returns {Promise<{endpoint: string, paging: Object, headers: Object, firstBatch: Object}>}
  */
 export async function getLinkedInSession() {
+  const cached = await tryCachedSession()
+  if (cached) {
+    console.log('✅ LinkedIn session reused from cache — no Chrome needed.')
+    return cached
+  }
+
   await migrateOldSession()
   await mkdir(SESSION_DIR, { recursive: true })
 
@@ -170,6 +217,8 @@ export async function getLinkedInSession() {
       'Run with DEBUG=1 to see all intercepted requests.'
     )
   }
+
+  await persistCachedSession(capturedConfig)
 
   return capturedConfig
 }
