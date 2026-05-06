@@ -4,16 +4,20 @@
  * Stores per-source knownKeys (dedup) and lastSyncAt timestamps in
  * $STATE_DIR/state.json.
  *
- * Schema v2:
+ * Schema v3:
  * {
- *   "version": 2,
+ *   "version": 3,
  *   "sources": {
  *     "linkedin": { "knownKeys": [], "lastSyncAt": "2026-04-13T10:00:00.000Z" },
  *     "twitter":  { "knownKeys": [], "lastSyncAt": null, "maxAgeDays": 365 }
+ *   },
+ *   "projects": {
+ *     "dona": { "lastSyncedAt": "2026-05-01T18:30:00.000Z" }
  *   }
  * }
  *
- * Backwards compatible: v1 files ({ knownKeys: [] }) are migrated automatically.
+ * Backwards compatible: v1 ({ knownKeys: [] }) and v2 (sources only) files
+ * are migrated automatically.
  */
 
 import { readFile, writeFile, mkdir, access } from 'fs/promises'
@@ -25,21 +29,26 @@ const STATE_FILE     = join(STATE_DIR, 'state.json')
 const OLD_STATE_FILE = join(homedir(), '.linkedin-notion-sync', 'state.json')
 
 /**
- * Migrates v1 state (flat knownKeys array) to v2 (per-source).
- * No-ops if already v2.
+ * Migrates older state schemas to current (v3).
+ * v1 ({ knownKeys: [] }) → v2 (per-source) → v3 (adds projects).
  */
 function migrate(raw) {
-  if (raw.version === 2) return raw
+  if (raw.version === 3) return raw
 
-  // v1 → v2: move root knownKeys into sources.linkedin
+  if (raw.version === 2) {
+    return { ...raw, version: 3, projects: raw.projects ?? {} }
+  }
+
+  // v1 → v3: move root knownKeys into sources.linkedin, add projects
   return {
-    version: 2,
+    version: 3,
     sources: {
       linkedin: {
         knownKeys: raw.knownKeys ?? [],
         lastSyncAt: null,
       },
     },
+    projects: {},
   }
 }
 
@@ -59,7 +68,7 @@ export async function loadState() {
     // saveState() will write it to the new location on next save
   } catch { /* old file also missing */ }
 
-  return { version: 2, sources: {} }
+  return { version: 3, sources: {}, projects: {} }
 }
 
 export async function saveState(state) {

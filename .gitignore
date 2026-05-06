@@ -19,3 +19,9 @@ node_modules/
 
 # Logs
 *.log
+
+# Personal newsletter prompts — kept local, not shared
+prompts/
+
+# Skill bundles — generated artifacts
+skills/*.zip

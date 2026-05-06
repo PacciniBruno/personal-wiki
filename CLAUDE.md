@@ -15,6 +15,7 @@ npm run bootstrap        # Full import of all saved posts + wiki synthesis
 npm run sync             # Incremental sync (new posts only) + wiki synthesis
 npm run update-wiki      # Re-run tier-1 wiki synthesis for all categories (manual)
 npm run update-wiki:cross# Run tier-2 cross-domain synthesis → synthesis.md (manual)
+npm run update-projects  # Re-run per-project wiki synthesis (manual)
 DEBUG=1 npm run sync     # Verbose: logs all Voyager URLs, saves debug JSON files
 ```
 
@@ -35,11 +36,19 @@ src/
   writer.js        Appends formatted post entries to $KB_DIR/raw/{slug}.md.
                    Updates index.md counts. Appends to log.md.
   init-kb.js       Creates knowledge base folder structure. Idempotent.
-  synthesize.js    Two-tier wiki synthesis via `claude -p` (full Claude Code harness):
+  claude-print.js  Spawns `claude -p` with prompt fed via stdin. Shared by
+                   theme synthesis and project synthesis.
+  synthesize.js    Two-tier theme wiki synthesis via `claude -p`:
                    - Tier 1 (daily): parallel claude -p per updated category →
                      updates wiki/{slug}.md
                    - Tier 2 (weekly): single claude -p reads all wiki/ pages →
                      updates synthesis.md (cross-domain patterns)
+  projects.js      Discovers projects under $KB_DIR/projects/, parses README.md
+                   manifests, computes resync needs, pre-extracts PDF text.
+  synthesize-projects.js
+                   Per-project living-doc synthesis. Daily, after tier-1.
+                   Reads README.md + notes + linked theme raw/ files; rewrites
+                   projects/{name}/wiki.md.
 ```
 
 ## Knowledge base structure
@@ -61,7 +70,35 @@ $KB_DIR/  (default: ~/knowledge/)
     sales-business-dev.md
     startup-entrepreneurship.md
   wiki/                 # LLM-synthesized living pages (same filenames as raw/)
+  projects/             # Per-project living docs (orthogonal to themes)
+    CLAUDE.md           # Layout and conventions for the projects subtree
+    {name}/
+      README.md         # YAML frontmatter (themes, status, since) + description
+      wiki.md           # Synthesized living doc, rewritten daily
+      *.md              # Free-form notes, meeting transcripts (you write these)
+      *.pdf             # Decks, attachments
+      *.pdf.txt         # Auto-generated text extracts of *.pdf
+  briefings/            # Weekly briefing outputs (produced externally, not in repo)
 ```
+
+## Projects axis
+
+Projects are an additive output axis: ingest, theme categorization, and theme synthesis
+are unchanged. A project pulls signal from its own free-form notes and from the linked
+themes declared in its `README.md` frontmatter:
+
+```yaml
+---
+name: dona
+themes: [ai-technology, product-ux, startup-entrepreneurship]
+status: exploring
+since: 2026-04-15
+---
+```
+
+Daily, after tier-1 theme synthesis, `synthesize-projects.js` runs `claude -p` per project
+that has new input (mtime-tracked) and rewrites `projects/{name}/wiki.md`. PDFs are
+pre-extracted to sibling `*.pdf.txt` so the agent only Reads `.md`/`.txt`.
 
 ## State persistence
 
@@ -83,7 +120,7 @@ ANTHROPIC_API_KEY=sk-ant-...
 Templates in `scripts/*.plist.template` — copy, fill in YOUR_USERNAME/YOUR_NODE_PATH/YOUR_PROJECT_PATH,
 then load with `launchctl load`.
 
-- `personal-wiki-sync` — daily: sync + tier-1 wiki update
+- `personal-wiki-sync` — daily: sync + tier-1 wiki update + per-project wiki update
 - `personal-wiki-synthesis` — weekly: tier-2 synthesis
 
 ## How the LinkedIn scraping works
