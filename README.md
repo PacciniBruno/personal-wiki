@@ -87,7 +87,7 @@ See `.env.example` for all options.
 ## Optional sources
 
 ### Twitter/X
-Works the same as LinkedIn — Chrome opens on first run, log in once. **Use email + password, not Google OAuth** — Puppeteer's Chromium can't complete the Google OAuth flow.
+Twitter/X is an optional source and is not part of the default `npm run sync` path. Chromium auth is unreliable here, especially around email-first and Google OAuth flows, so only use it explicitly when you want to attempt a bookmarks sync.
 
 ### Apple Notes
 Set `APPLE_NOTES_FOLDER` in `.env`. On iPhone: **Share → Notes** → save to that folder. The sync extracts URLs from each note, fetches the article, and moves the note to `"[folder] Processed"` when done.
