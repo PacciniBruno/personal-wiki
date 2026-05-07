@@ -58,6 +58,9 @@ and other sources. It uses the two-layer wiki pattern:
 - \`wiki/\`  — LLM-synthesized knowledge pages, updated daily after each sync
 - \`synthesis.md\` — cross-domain patterns and helicopter view, updated weekly
 - \`projects/\` — per-project living docs (one folder per project; see \`projects/CLAUDE.md\`)
+- \`inbox/\` — auto-ingested web clips; processed items move to \`inbox/processed/\`
+- \`articles to read/\` — read-later shelf, not auto-ingested
+- \`inspiration/\` — reference shelf, not auto-ingested
 
 ## How to search
 
@@ -192,7 +195,9 @@ export async function initKB() {
   await mkdir(WIKI_DIR,      { recursive: true })
   await mkdir(PROJECTS_DIR,  { recursive: true })
   await mkdir(BRIEFINGS_DIR, { recursive: true })
-  await mkdir(join(KB_DIR, 'chrome-clipped'), { recursive: true })
+  await mkdir(join(KB_DIR, 'inbox'), { recursive: true })
+  await mkdir(join(KB_DIR, 'articles to read'), { recursive: true })
+  await mkdir(join(KB_DIR, 'inspiration'), { recursive: true })
 
   // Root files
   await writeIfMissing(join(KB_DIR, 'CLAUDE.md'),               CLAUDE_MD)

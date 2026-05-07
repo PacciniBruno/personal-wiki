@@ -1,18 +1,24 @@
 /**
  * sources/web/index.js — Web clips adapter.
  *
- * Reads .md files from a drop folder (default: $KB_DIR/chrome-clipped/).
- * Configure your Obsidian Web Clipper to save to that folder, or use any
- * other clipper that outputs markdown.
+ * Reads .md files from one or more drop folders.
+ *
+ * Defaults:
+ *   - Preferred inbox: $KB_DIR/inbox/
+ *   - Legacy fallback: $KB_DIR/chrome-clipped/
+ *
+ * Configure Obsidian Web Clipper (or any markdown clipper) to save files into
+ * the inbox folder when you want them ingested into the wiki.
  *
  * Workflow:
- *   Browser → Obsidian Web Clipper → saves .md to $KB_DIR/chrome-clipped/
+ *   Browser → Obsidian Web Clipper → saves .md to $KB_DIR/inbox/
  *   Pipeline: reads and parses each .md → ingests as 'article' item
- *   After ingest: file is moved to chrome-clipped/processed/ (not deleted)
+ *   After ingest: file is moved to {inbox}/processed/ (not deleted)
  *
  * Config (in .env):
- *   WEB_CLIP_DIR — path to the drop folder. Defaults to $KB_DIR/chrome-clipped.
- *                  Set to 'false' to disable this source entirely.
+ *   WEB_CLIP_DIR — path to a custom ingest folder. Defaults to $KB_DIR/inbox.
+ *                  If unset, the adapter also scans legacy $KB_DIR/chrome-clipped
+ *                  when that folder exists. Set to 'false' to disable entirely.
  *
  * Frontmatter parsed (all optional):
  *   title, url, author, site, date
@@ -20,12 +26,30 @@
  * This source is always enabled (returns [] if the folder is empty or missing).
  */
 
-import { readdir, readFile, rename, mkdir } from 'fs/promises'
+import { access, readdir, readFile, rename, mkdir } from 'fs/promises'
 import { join, basename } from 'path'
 import { KB_DIR, WEB_CLIP_DIR } from '../../config.js'
 
-function getClipDir() {
-  return WEB_CLIP_DIR ?? join(KB_DIR, 'chrome-clipped')
+const DEFAULT_CLIP_DIR = join(KB_DIR, 'inbox')
+const LEGACY_CLIP_DIR  = join(KB_DIR, 'chrome-clipped')
+
+async function exists(path) {
+  try {
+    await access(path)
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function getClipDirs() {
+  if (WEB_CLIP_DIR) return [WEB_CLIP_DIR]
+
+  const dirs = []
+  if (await exists(DEFAULT_CLIP_DIR)) dirs.push(DEFAULT_CLIP_DIR)
+  if (await exists(LEGACY_CLIP_DIR))  dirs.push(LEGACY_CLIP_DIR)
+
+  return dirs.length > 0 ? dirs : [DEFAULT_CLIP_DIR]
 }
 
 /**
@@ -86,65 +110,71 @@ export const source = {
   },
 
   async fetch({ mode, state, knownKeys }) {
-    const clipDir      = getClipDir()
-    const processedDir = join(clipDir, 'processed')
-
-    let files
-    try {
-      files = (await readdir(clipDir)).filter(f => f.endsWith('.md') && f !== 'processed')
-    } catch {
-      return [] // folder doesn't exist yet — nothing to clip
-    }
-
-    if (files.length === 0) return []
-
-    await mkdir(processedDir, { recursive: true })
-
+    const clipDirs = await getClipDirs()
     const items = []
-    for (const filename of files) {
-      const filePath = join(clipDir, filename)
-      let content
+    const activeDirs = []
+
+    for (const clipDir of clipDirs) {
+      let files
       try {
-        content = await readFile(filePath, 'utf8')
+        files = (await readdir(clipDir)).filter(f => f.endsWith('.md') && f !== 'processed')
       } catch {
         continue
       }
 
-      const { meta, body } = parseFrontmatter(content)
-      const url        = meta.url ?? meta.source ?? meta.link ?? ''
-      const externalId = url || filename
+      if (files.length === 0) continue
 
-      if (knownKeys.has(externalId)) {
-        // Already processed — move it out of the way anyway
-        await rename(filePath, join(processedDir, filename)).catch(() => {})
-        continue
+      activeDirs.push(clipDir)
+
+      const processedDir = join(clipDir, 'processed')
+      await mkdir(processedDir, { recursive: true })
+
+      for (const filename of files) {
+        const filePath = join(clipDir, filename)
+        let content
+        try {
+          content = await readFile(filePath, 'utf8')
+        } catch {
+          continue
+        }
+
+        const { meta, body } = parseFrontmatter(content)
+        const url        = meta.url ?? meta.source ?? meta.link ?? ''
+        const externalId = url || filename
+
+        if (knownKeys.has(externalId)) {
+          // Already processed — move it out of the way anyway
+          await rename(filePath, join(processedDir, filename)).catch(() => {})
+          continue
+        }
+
+        items.push({
+          source:      'web',
+          sourceType:  'article',
+          externalId,
+          uniqueKey:   `web:${externalId}`,
+          url,
+          title:       meta.title ?? basename(filename, '.md'),
+          text:        body.slice(0, 3000),
+          author:      meta.author ?? meta.site ?? '',
+          authorTitle: meta.description ?? '',
+          savedAt:     (meta.date ?? meta.saved ?? meta.created ?? meta.published)
+                         ? new Date(meta.date ?? meta.saved ?? meta.created ?? meta.published).toISOString()
+                         : new Date().toISOString(),
+          createdAt:   null,
+          publishedAt: null,
+          tags:        [],
+          metadata:    { filename, clipDir, ...meta },
+        })
+
+        // Move to processed after reading — ingest will write to knowledge base
+        await rename(filePath, join(processedDir, filename))
       }
-
-      items.push({
-        source:      'web',
-        sourceType:  'article',
-        externalId,
-        uniqueKey:   `web:${externalId}`,
-        url,
-        title:       meta.title ?? basename(filename, '.md'),
-        text:        body.slice(0, 3000),
-        author:      meta.author ?? meta.site ?? '',
-        authorTitle: meta.description ?? '',
-        savedAt:     (meta.date ?? meta.saved ?? meta.created ?? meta.published)
-                       ? new Date(meta.date ?? meta.saved ?? meta.created ?? meta.published).toISOString()
-                       : new Date().toISOString(),
-        createdAt:   null,
-        publishedAt: null,
-        tags:        [],
-        metadata:    { filename, clipDir, ...meta },
-      })
-
-      // Move to processed after reading — ingest will write to knowledge base
-      await rename(filePath, join(processedDir, filename))
     }
 
     if (items.length > 0) {
-      console.log(`\n✅ ${items.length} web clip(s) found in chrome-clipped/`)
+      const labels = activeDirs.map(dir => basename(dir)).join(', ')
+      console.log(`\n✅ ${items.length} web clip(s) found in ${labels}`)
     }
 
     return items

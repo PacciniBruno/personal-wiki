@@ -2,7 +2,7 @@
  * index.js — CLI orchestrator.
  *
  * Usage:
- *   node src/index.js --mode=sync              (default: LinkedIn only)
+ *   node src/index.js --mode=sync              (default: all enabled sources)
  *   node src/index.js --mode=bootstrap
  *   node src/index.js --mode=sync --source=all
  *   node src/index.js --mode=sync --source=linkedin
@@ -24,7 +24,7 @@ import { ALL_SOURCES, getEnabledSources, getSourceById } from './sources/index.j
 
 const args       = process.argv.slice(2)
 const mode       = args.find(a => a.startsWith('--mode='))?.split('=')[1]   ?? 'sync'
-const sourceArg  = args.find(a => a.startsWith('--source='))?.split('=')[1] ?? 'linkedin'
+const sourceArg  = args.find(a => a.startsWith('--source='))?.split('=')[1] ?? 'all'
 
 // ─── Env validation ──────────────────────────────────────────────────────────
 
