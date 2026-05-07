@@ -25,6 +25,7 @@
  *                       Example: "a founder and product leader focused on AI startups"
  */
 
+import 'dotenv/config'
 import { homedir } from 'os'
 import { join }    from 'path'
 import { execSync } from 'child_process'

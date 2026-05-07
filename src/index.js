@@ -2,7 +2,7 @@
  * index.js — CLI orchestrator.
  *
  * Usage:
- *   node src/index.js --mode=sync              (default: all enabled sources)
+ *   node src/index.js --mode=sync              (default: LinkedIn + Web Clips + Apple Notes if configured)
  *   node src/index.js --mode=bootstrap
  *   node src/index.js --mode=sync --source=all
  *   node src/index.js --mode=sync --source=linkedin
@@ -11,9 +11,6 @@
  * Pipeline delegated to src/pipeline/ingest.js.
  * Source selection delegated to src/sources/index.js.
  */
-
-import { config as loadDotenv } from 'dotenv'
-loadDotenv({ override: true })
 import { KB_DIR, config }                    from './config.js'
 import { loadState, saveState }              from './state.js'
 import { runCategoryUpdates }                from './synthesize.js'
@@ -24,7 +21,7 @@ import { ALL_SOURCES, getEnabledSources, getSourceById } from './sources/index.j
 
 const args       = process.argv.slice(2)
 const mode       = args.find(a => a.startsWith('--mode='))?.split('=')[1]   ?? 'sync'
-const sourceArg  = args.find(a => a.startsWith('--source='))?.split('=')[1] ?? 'all'
+const sourceArg  = args.find(a => a.startsWith('--source='))?.split('=')[1] ?? null
 
 // ─── Env validation ──────────────────────────────────────────────────────────
 
@@ -39,6 +36,13 @@ function validateEnv() {
 // ─── Source selection ─────────────────────────────────────────────────────────
 
 function selectSources() {
+  if (!sourceArg) {
+    const defaultIds = ['linkedin', 'web', 'apple-notes']
+    return defaultIds
+      .map(id => getSourceById(id))
+      .filter(source => source?.isEnabled(config))
+  }
+
   if (sourceArg === 'all') {
     return getEnabledSources(config)
   }

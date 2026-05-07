@@ -15,7 +15,7 @@ NODE="$(command -v node)"
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 cd "$DIR"
-"$NODE" src/index.js --mode=sync --source=all \
+"$NODE" src/index.js --mode=sync \
   && "$NODE" src/synthesize.js --tier=1 \
   && "$NODE" src/synthesize-projects.js \
   || exit 1
