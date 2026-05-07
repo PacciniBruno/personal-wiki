@@ -93,7 +93,13 @@ Works the same as LinkedIn — Chrome opens on first run, log in once. **Use ema
 Set `APPLE_NOTES_FOLDER` in `.env`. On iPhone: **Share → Notes** → save to that folder. The sync extracts URLs from each note, fetches the article, and moves the note to `"[folder] Processed"` when done.
 
 ### Web clips
-Install [Obsidian Web Clipper](https://obsidian.md/clipper) and point it at `~/knowledge/chrome-clipped/`. The sync picks up any `.md` files there automatically.
+Install [Obsidian Web Clipper](https://obsidian.md/clipper) and point it at `~/knowledge/inbox/`. The sync picks up any top-level `.md` files there automatically and moves them to `~/knowledge/inbox/processed/` after ingest. Legacy `~/knowledge/chrome-clipped/` is still scanned automatically if it exists.
+
+### Suggested folder layout
+- `~/knowledge/inbox/` — things you want ingested into the wiki.
+- `~/knowledge/articles to read/` — read-later shelf, not auto-ingested.
+- `~/knowledge/inspiration/` — reference shelf, not auto-ingested.
+- Apple Notes lives in the Notes app, not inside `~/knowledge/`: save items into your configured folder (for example `Saved Posts`), then the sync moves them to `Saved Posts Processed`.
 
 ## Automation
 

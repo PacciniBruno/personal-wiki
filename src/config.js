@@ -52,12 +52,13 @@ export const CLAUDE_BIN = detectClaudeBin()
 
 /**
  * Drop folder for web clips (Obsidian Web Clipper output, or any other clipper).
- * Default: $KB_DIR/chrome-clipped — set to null to disable this source.
- * The folder is created automatically on first init-kb run.
+ * Default: $KB_DIR/inbox — set to null to disable this source.
+ * Legacy fallback: $KB_DIR/chrome-clipped is still scanned automatically.
+ * The default folder is created automatically on first init-kb run.
  */
 export const WEB_CLIP_DIR = process.env.WEB_CLIP_DIR === 'false'
   ? null
-  : (process.env.WEB_CLIP_DIR ?? null) // null means "use default KB_DIR/chrome-clipped" — resolved in the adapter
+  : (process.env.WEB_CLIP_DIR ?? null) // null means "use default KB_DIR/inbox" — resolved in the adapter
 
 /** Apple Notes folder name to scan for saved links. null → source is disabled. */
 export const APPLE_NOTES_FOLDER  = process.env.APPLE_NOTES_FOLDER  ?? null
