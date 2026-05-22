@@ -41,8 +41,10 @@ src/
   synthesize.js    Two-tier theme wiki synthesis via `claude -p`:
                    - Tier 1 (daily): parallel claude -p per updated category →
                      updates wiki/{slug}.md
-                   - Tier 2 (weekly): single claude -p reads all wiki/ pages →
-                     updates synthesis.md (cross-domain patterns)
+                   - Tier 2 (daily): non-agentic claude -p reads all wiki/ pages,
+                     the current synthesis, and recent synthesis-history.md →
+                     rewrites synthesis.md + appends a dated entry to
+                     synthesis-history.md (the past-days grounding log)
   projects.js      Discovers projects under $KB_DIR/projects/, parses README.md
                    manifests, computes resync needs, pre-extracts PDF text.
   synthesize-projects.js
@@ -57,7 +59,9 @@ src/
 $KB_DIR/  (default: ~/knowledge/)
   index.md              # Topic index with post counts and last-updated dates
   log.md                # Append-only ingest log ([INGEST] / [REMOVED] prefixes)
-  synthesis.md          # Cross-domain patterns, helicopter view (weekly)
+  synthesis.md          # Cross-domain patterns, helicopter view (daily)
+  synthesis-history.md  # Append-only dated log of cross-domain signal.
+                        # Tier-2's past-days memory — fed back as grounding.
   raw/                  # Source posts, append-only, one file per category
     ai-technology.md
     career-work.md
@@ -121,7 +125,7 @@ Templates in `scripts/*.plist.template` — copy, fill in YOUR_USERNAME/YOUR_NOD
 then load with `launchctl load`.
 
 - `personal-wiki-sync` — daily: sync + tier-1 wiki update + per-project wiki update
-- `personal-wiki-synthesis` — weekly: tier-2 synthesis
+- `personal-wiki-synthesis` — daily: tier-2 synthesis
 
 ## How the LinkedIn scraping works
 

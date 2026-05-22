@@ -28,6 +28,23 @@ import { claudePrint } from './claude-print.js'
 
 const RAW_DIR  = join(KB_DIR, 'raw')
 
+const MAX_CONCURRENCY = 3
+
+async function runWithLimit(items, limit, worker) {
+  const results = new Array(items.length)
+  let next = 0
+  async function pump() {
+    while (true) {
+      const i = next++
+      if (i >= items.length) return
+      try { results[i] = { status: 'fulfilled', value: await worker(items[i], i) } }
+      catch (err) { results[i] = { status: 'rejected', reason: err } }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, pump))
+  return results
+}
+
 function buildProjectPrompt(project, since) {
   const today = new Date().toISOString().slice(0, 10)
   const themes = project.manifest.themes
@@ -89,7 +106,7 @@ export async function runProjectSynthesis({ only, since } = {}) {
   const projects = await listProjects()
   if (projects.length === 0) {
     console.log('   No projects to sync.')
-    return
+    return { failed: [] }
   }
 
   const state = await loadState()
@@ -107,10 +124,10 @@ export async function runProjectSynthesis({ only, since } = {}) {
 
   if (targets.length === 0) {
     console.log('   No projects need resync.')
-    return
+    return { failed: [] }
   }
 
-  console.log(`\n📁 Updating ${targets.length} project wiki(s)...`)
+  console.log(`\n📁 Updating ${targets.length} project wiki(s) (concurrency=${MAX_CONCURRENCY})...`)
 
   const sinceDate = since ?? new Date(Date.now() - 14 * 86400_000).toISOString().slice(0, 10)
 
@@ -120,26 +137,25 @@ export async function runProjectSynthesis({ only, since } = {}) {
     catch (err) { console.log(`   ⚠️  ${p.name}: PDF extract failed — ${err.message}`) }
   }
 
-  const results = await Promise.allSettled(
-    targets.map(async p => {
-      const prompt = buildProjectPrompt(p, sinceDate)
-      try {
-        await claudePrint(prompt, 300_000)
-        state.projects[p.name] = { lastSyncedAt: new Date().toISOString() }
-        process.stdout.write(`   ✅ ${p.name}\n`)
-      } catch (err) {
-        process.stdout.write(`   ⚠️  ${p.name}: ${err.message}\n`)
-        throw err
-      }
-    })
-  )
+  const results = await runWithLimit(targets, MAX_CONCURRENCY, async p => {
+    const prompt = buildProjectPrompt(p, sinceDate)
+    try {
+      await claudePrint(prompt, 300_000)
+      state.projects[p.name] = { lastSyncedAt: new Date().toISOString() }
+      process.stdout.write(`   ✅ ${p.name}\n`)
+    } catch (err) {
+      process.stdout.write(`   ⚠️  ${p.name}: ${err.message}\n`)
+      throw err
+    }
+  })
 
   await saveState(state)
 
-  const failed = results.filter(r => r.status === 'rejected')
+  const failed = targets.filter((_, i) => results[i].status === 'rejected').map(p => p.name)
   if (failed.length > 0) {
-    console.log(`   ⚠️  ${failed.length} project wiki(s) failed — will retry on next sync.`)
+    console.log(`   ⚠️  ${failed.length}/${targets.length} project wiki(s) failed — see ~/.personal-wiki/synth-failures.log`)
   }
+  return { failed }
 }
 
 if (process.argv[1]?.endsWith('synthesize-projects.js')) {
@@ -150,8 +166,7 @@ if (process.argv[1]?.endsWith('synthesize-projects.js')) {
   const only  = projectsArg ? projectsArg.split(',').map(s => s.trim()).filter(Boolean) : null
   const since = sinceArg
 
-  runProjectSynthesis({ only, since }).catch(err => {
-    console.error(err.message)
-    process.exit(1)
-  })
+  runProjectSynthesis({ only, since })
+    .then(({ failed }) => { if (failed.length > 0) process.exit(1) })
+    .catch(err => { console.error(err.message); process.exit(1) })
 }
