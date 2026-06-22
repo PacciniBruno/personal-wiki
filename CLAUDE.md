@@ -30,7 +30,8 @@ failure logs, then prints a verdict.
 Common causes:
 - **LinkedIn session expired.** A scheduled (launchd) run cannot log in
   interactively; it fails fast and skips LinkedIn (other sources still sync).
-  Fix: run `npm run sync` once in a terminal to refresh the session.
+  Fix: run `npm run linkedin:refresh` (or `npm run sync`) once in a terminal to
+  refresh the session.
 - **`claude` not logged in.** Synthesis strips `ANTHROPIC_API_KEY` and uses the
   subscription, so `claude /login` must be done or all wiki/project synthesis
   fails while ingest still works.

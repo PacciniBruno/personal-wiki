@@ -188,7 +188,7 @@ async function checkLinkedIn() {
   }
   console.log(`   cached session present (refreshed ${cache.days.toFixed(1)}d ago)`)
   console.log('   note: if it has expired, a scheduled (launchd) run cannot re-login —')
-  console.log('         run `npm run sync` once in a terminal to refresh it.')
+  console.log('         run `npm run linkedin:refresh` once in a terminal to refresh it.')
 }
 
 // ── Failure logs ───────────────────────────────────────────────────────────
