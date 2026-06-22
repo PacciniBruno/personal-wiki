@@ -1,20 +1,21 @@
 /**
  * synthesize.js
  *
- * Two-tier wiki synthesis using the Claude Code CLI (claude -p).
- * The full Claude Code harness (Read, Write, Grep, Glob, Bash tools) is used
- * so the agent can navigate the knowledge base lazily and precisely.
+ * Two-tier wiki synthesis. Both tiers are non-agentic: Node reads the inputs,
+ * inlines them in the prompt, asks `claude -p` (tools disabled) to return the
+ * new markdown, and Node writes it back. One turn per call, no cache-write
+ * churn, no Read/Write/Bash loop — cheap and predictable.
  *
  * Tier 1 — Per-category wiki updates (daily, after sync):
- *   Bounded-concurrency claude -p instances, one per updated category.
- *   Each reads raw/{category}.md + wiki/{category}.md and updates the wiki page.
+ *   Bounded-concurrency: one call per updated category. Inputs are the tail of
+ *   raw/{slug}.md (~40 most recent entries) + the current wiki/{slug}.md.
+ *   Defaults to Haiku — summarization is its sweet spot.
  *
  * Tier 2 — Cross-category synthesis (daily):
- *   Non-agentic: Node reads all wiki/*.md, the current synthesis, and the
- *   recent synthesis-history.md, inlines them in the prompt, and asks claude -p
- *   (tools disabled) to return the new synthesis.md plus a compact dated
- *   history entry. Node writes synthesis.md and appends the entry to
- *   synthesis-history.md. One turn, no cache-write churn — cheap to run daily.
+ *   Reads every wiki/*.md, the current synthesis, and the recent
+ *   synthesis-history.md, inlines them, returns the new synthesis.md plus a
+ *   compact dated history entry. Node writes synthesis.md and appends the entry
+ *   to synthesis-history.md.
  *
  *   synthesis-history.md is the system's past-days memory: an append-only,
  *   bounded-feed log. Past entries are never sent back through the model to be
@@ -22,11 +23,8 @@
  *
  * No in-process retries: terminal errors (budget cap, credit exhaustion, auth)
  * are non-transient, and retrying immediately just doubles the spend. The
- * wrapper script's daily/weekly stamp is the retry cadence — a failure today
- * is retried tomorrow / next week, never the same hour.
- *
- * Exit code is informational: the wrapper stamps the day/week regardless of
- * outcome, so failures never trigger an hourly retry loop.
+ * wrapper script's daily stamp is the retry cadence — a failure today is
+ * retried tomorrow, never the same hour.
  *
  * Usage:
  *   node src/synthesize.js --tier=1 --categories=ai-technology,product-ux --since=2025-04-01
@@ -43,6 +41,15 @@ const SYNTHESIS_FILE = join(KB_DIR, 'synthesis.md')
 const HISTORY_FILE   = join(KB_DIR, 'synthesis-history.md')
 
 const MAX_CONCURRENCY = 3
+
+// Tier-1 model — summarization fits Haiku. Override with SYNTH_MODEL_TIER1
+// (or the global SYNTH_MODEL when this isn't set).
+const TIER1_MODEL = process.env.SYNTH_MODEL_TIER1 ?? process.env.SYNTH_MODEL ?? 'haiku'
+
+// Per-category prompt sizing. Each entry in raw/ is one ## heading; we take
+// the last N non-[REMOVED] entries, then cap the total inlined size.
+const TIER1_MAX_ENTRIES = 40
+const TIER1_MAX_CHARS   = 60_000
 
 // How many recent daily history entries to feed back into the prompt as
 // temporal grounding. The file itself is append-only and keeps everything;
@@ -61,36 +68,46 @@ const HISTORY_HEADER = `# Synthesis History
 
 // ─── Prompt builders ─────────────────────────────────────────────────────────
 
-function buildCategoryPrompt(slug, sinceDate) {
-  const cat      = CATEGORIES.find(c => c.slug === slug)
-  const name     = cat?.name ?? slug
-  const rawFile  = rawFilePath(slug)
-  const wikiFile = wikiFilePath(slug)
-  const today    = new Date().toISOString().slice(0, 10)
+// Reads the tail of a raw/{slug}.md file as recent post entries. Entries are
+// `## heading`-delimited; we keep the last N non-[REMOVED] entries, then trim
+// to a hard char cap so a single huge entry can't blow up the prompt.
+async function tailRawEntries(path, maxEntries, maxChars) {
+  let text
+  try { text = await readFile(path, 'utf8') } catch { return '' }
+  const parts = text.split(/\n(?=## )/)
+  const entries = parts.filter(p => p.startsWith('## ') && !p.startsWith('## [REMOVED'))
+  let tail = entries.slice(-maxEntries).join('\n')
+  if (tail.length > maxChars) tail = tail.slice(-maxChars)
+  return tail
+}
 
+function buildCategoryPrompt({ name, slug, sinceDate, rawTail, currentWiki, today }) {
   return `You are updating a personal knowledge base wiki page for the topic "${name}".
 
-FILES:
-- Raw source posts: ${rawFile}
-- Current wiki page: ${wikiFile}
+You have no tools. The inputs are inlined below. Respond with the full new
+wiki page only — no preamble, no closing remarks, no code fences.
+
+=== current wiki/${slug}.md ===
+${currentWiki || '(empty — first synthesis)'}
+=== end current wiki/${slug}.md ===
+
+=== recent raw posts (oldest first; [REMOVED] entries already excluded) ===
+${rawTail || '(empty — no posts yet)'}
+=== end recent raw posts ===
 
 TASK:
-1. Get recent raw posts using Bash: \`tail -n 600 ${rawFile}\`
-   This gives you the ~40-50 most recent entries. Focus on those dated since ${sinceDate}.
-   Skip entries marked [REMOVED].
-2. Read the current wiki page: ${wikiFile}
-3. Update the wiki page with this structure (rewrite the whole file):
+Rewrite the wiki page in full. Focus heavily on posts dated since ${sinceDate}.
 
 # ${name}
 
 > Living knowledge page. Sources: raw/${slug}.md
-> Posts: [total count from index or estimate] | Last updated: ${today}
+> Last updated: ${today}
 
 ## Key Themes
-[3-7 recurring themes across all posts. Each as a bullet with 1-2 sentence synthesis and one example citation with URL]
+[3-7 recurring themes across the posts. Each as a bullet with 1-2 sentence synthesis and one example citation with URL.]
 
 ## Patterns & Tensions
-[2-4 interesting tensions or contradictions you notice in the posts]
+[2-4 interesting tensions or contradictions across the posts.]
 
 ## Notable Voices
 [5-10 authors who appear repeatedly or have particularly sharp takes. Format: **Name** — [angle/perspective], [URL to one of their posts]]
@@ -98,13 +115,11 @@ TASK:
 ## Recent Signal (since ${sinceDate})
 [Concrete synthesis of the most recent posts. Be specific: cite authors, quotes, URLs. 5-10 bullets.]
 
-4. Write the updated wiki page back to ${wikiFile}.
-
 STYLE:
-- Dense reference document, not prose. Bullet points with inline citations (URL).
+- Dense reference document, not prose. Bullet points with inline URL citations.
 - For fast-moving topics like AI/Tech, note post dates explicitly.
 - Only synthesize what is actually in the posts — do not invent content.
-- Keep the whole file under 150 lines.`
+- Keep the whole page under 150 lines.`
 }
 
 function buildCrossCategoryPrompt({ wikiPages, currentSynthesis, history, today }) {
@@ -269,12 +284,24 @@ export async function runCategoryUpdates(updatedSlugs, sinceDate) {
     return { failed: [] }
   }
 
-  console.log(`\n⑤ Updating wiki pages (${updatedSlugs.length} categories, concurrency=${MAX_CONCURRENCY})...`)
+  console.log(`\n⑤ Updating wiki pages (${updatedSlugs.length} categories, concurrency=${MAX_CONCURRENCY}, model=${TIER1_MODEL})...`)
+
+  const today = new Date().toISOString().slice(0, 10)
 
   const results = await runWithLimit(updatedSlugs, MAX_CONCURRENCY, async slug => {
-    const prompt = buildCategoryPrompt(slug, sinceDate)
+    const cat  = CATEGORIES.find(c => c.slug === slug)
+    const name = cat?.name ?? slug
+
+    const [rawTail, currentWiki] = await Promise.all([
+      tailRawEntries(rawFilePath(slug), TIER1_MAX_ENTRIES, TIER1_MAX_CHARS),
+      readFile(wikiFilePath(slug), 'utf8').catch(() => ''),
+    ])
+
+    const prompt = buildCategoryPrompt({ name, slug, sinceDate, rawTail, currentWiki, today })
+
     try {
-      await claudePrint(prompt, 300_000)
+      const result = await claudePrint(prompt, 240_000, { tools: 'none', model: TIER1_MODEL })
+      await writeFile(wikiFilePath(slug), stripCodeFences(result))
       process.stdout.write(`   ✅ ${slug}\n`)
     } catch (err) {
       process.stdout.write(`   ⚠️  ${slug}: ${err.message}\n`)

@@ -58,8 +58,11 @@ const EXCLUDE_URL_PATTERNS = [
 /**
  * Tries to reuse a previously-captured session. Probes the cached endpoint with
  * a small request; if it returns post-shaped data, returns a refreshed config
- * (with a freshly-fetched firstBatch). Returns null on any failure so the
- * caller falls back to Puppeteer.
+ * (with a freshly-fetched firstBatch).
+ *
+ * Returns null on persistent failure so the caller falls back to Puppeteer.
+ * Transient failures (network glitches, 5xx, rate limits) are retried — a flaky
+ * hourly tick used to silently fall through to Puppeteer and lose the day.
  */
 async function tryCachedSession() {
   let cached
@@ -70,17 +73,34 @@ async function tryCachedSession() {
   }
   if (!cached?.endpoint || !cached?.headers) return null
 
-  try {
-    const url = buildPaginatedUrl(cached.endpoint, 0, cached.paging?.count ?? 10, null)
-    const res = await fetch(url, { headers: cached.headers })
-    if (!res.ok) return null
-    const body = await res.json()
-    const elements = extractElements(body)
-    if (!elements?.length || !elements.some(looksLikePost)) return null
-    return { ...cached, firstBatch: body, paging: extractPaging(body) }
-  } catch {
-    return null
+  const url = buildPaginatedUrl(cached.endpoint, 0, cached.paging?.count ?? 10, null)
+
+  // Retry on transient failures (network, 5xx, 429). Auth/queryId failures
+  // (4xx other than 429) bail immediately — retrying won't help.
+  const MAX_ATTEMPTS = 3
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      const res = await fetch(url, { headers: cached.headers, signal: AbortSignal.timeout(15_000) })
+      if (res.ok) {
+        const body = await res.json()
+        const elements = extractElements(body)
+        if (elements?.length && elements.some(looksLikePost)) {
+          return { ...cached, firstBatch: body, paging: extractPaging(body) }
+        }
+        return null // OK but no post-shaped data — session is dead, force refresh
+      }
+      // Retry on 429 / 5xx; bail on other 4xx (likely auth or queryId expired).
+      if (res.status !== 429 && res.status < 500) return null
+    } catch {
+      // network error or timeout — retryable
+    }
+    if (attempt < MAX_ATTEMPTS) await sleep(2000 * attempt)
   }
+  return null
+}
+
+function isInteractive() {
+  return Boolean(process.stdin.isTTY)
 }
 
 async function persistCachedSession(config) {
@@ -101,11 +121,24 @@ async function persistCachedSession(config) {
  *
  * @returns {Promise<{endpoint: string, paging: Object, headers: Object, firstBatch: Object}>}
  */
-export async function getLinkedInSession() {
-  const cached = await tryCachedSession()
-  if (cached) {
-    console.log('✅ LinkedIn session reused from cache — no Chrome needed.')
-    return cached
+export async function getLinkedInSession({ forceRefresh = false } = {}) {
+  if (!forceRefresh) {
+    const cached = await tryCachedSession()
+    if (cached) {
+      console.log('✅ LinkedIn session reused from cache — no Chrome needed.')
+      return cached
+    }
+  }
+
+  // Puppeteer needs a TTY: the saved-posts page may require login, and the
+  // re-auth step calls waitForEnter(). Running it from launchd (no TTY) pops a
+  // Chrome window with no way to complete sign-in and eventually fails noisily,
+  // which is what was breaking the daily sync. Bail with a clear next step.
+  if (!isInteractive()) {
+    throw new Error(
+      'LinkedIn session expired or invalid, and no TTY is available to refresh it. ' +
+      'Run `npm run linkedin:refresh` (or `npm run sync`) from your terminal to log in again.'
+    )
   }
 
   await migrateOldSession()

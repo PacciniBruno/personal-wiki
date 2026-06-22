@@ -31,9 +31,10 @@ src/
     parser.js      Paginates via native fetch(), parses Voyager responses → SourceItems.
     index.js       SourceAdapter: orchestrates session + parser.
   categorize.js    Claude Haiku (claude-haiku-4-5-20251001). Returns category,
-                   subcategory, tags[], summary per post. 150ms delay.
+                   subcategory, tags[], summary, facts[] per post. 150ms delay.
   state.js         Loads/saves $STATE_DIR/state.json (knownKeys for dedup).
-  writer.js        Appends formatted post entries to $KB_DIR/raw/{slug}.md.
+  writer.js        Appends formatted post entries to $KB_DIR/raw/{slug}.md and
+                   extracted facts to $KB_DIR/facts/{slug}.md.
                    Updates index.md counts. Appends to log.md.
   init-kb.js       Creates knowledge base folder structure. Idempotent.
   claude-print.js  Spawns `claude -p` with prompt fed via stdin. Shared by
@@ -74,6 +75,9 @@ $KB_DIR/  (default: ~/knowledge/)
     sales-business-dev.md
     startup-entrepreneurship.md
   wiki/                 # LLM-synthesized living pages (same filenames as raw/)
+  facts/                # Atomic, verifiable facts, one file per category
+    {category}.md       # Facts extracted from posts during categorization
+    agent-derived.md    # Facts added by agents while consulting the KB
   projects/             # Per-project living docs (orthogonal to themes)
     CLAUDE.md           # Layout and conventions for the projects subtree
     {name}/
@@ -121,11 +125,10 @@ ANTHROPIC_API_KEY=sk-ant-...
 
 ## Automation (launchd)
 
-Templates in `scripts/*.plist.template` — copy, fill in YOUR_USERNAME/YOUR_NODE_PATH/YOUR_PROJECT_PATH,
-then load with `launchctl load`.
+`scripts/setup.sh` installs two launchd agents:
 
 - `personal-wiki-sync` — daily: sync + tier-1 wiki update + per-project wiki update
-- `personal-wiki-synthesis` — daily: tier-2 synthesis
+- `personal-wiki-synthesis` — daily: tier-2 cross-domain synthesis
 
 ## How the LinkedIn scraping works
 
@@ -158,3 +161,5 @@ then update `extractElements()` and `looksLikePost()` in `src/sources/linkedin/p
   (`?variables=(start:N,...)`), and cursor-based pagination. LinkedIn changes this.
 - **Dedup key** — `post.uniqueKey` = URL if available, else URN. Stored in state.json.
   Sync stops on first post whose uniqueKey is in knownKeys.
+
+@FP_CLAUDE.md

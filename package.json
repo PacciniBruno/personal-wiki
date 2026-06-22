@@ -10,7 +10,8 @@
     "init-kb": "node src/init-kb.js",
     "update-wiki": "node src/synthesize.js --tier=1",
     "update-wiki:cross": "node src/synthesize.js --tier=2",
-    "update-projects": "node src/synthesize-projects.js"
+    "update-projects": "node src/synthesize-projects.js",
+    "linkedin:refresh": "node src/sources/linkedin/refresh.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
