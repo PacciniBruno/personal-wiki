@@ -108,6 +108,20 @@ export async function getLinkedInSession() {
     return cached
   }
 
+  // The cached session is dead and we'd need to open a visible Chrome window
+  // and (possibly) wait for an interactive login. That can't work when there's
+  // no terminal attached — e.g. under launchd. Rather than launch a doomed
+  // headless:false browser and block on stdin that never arrives, fail fast
+  // with an actionable message. Re-logging in is a one-time manual step.
+  if (!process.stdin.isTTY) {
+    throw new Error(
+      'LinkedIn session expired and no terminal is attached (running under ' +
+      'launchd?). Run `npm run sync` once in a terminal to sign back in — the ' +
+      'refreshed session is then reused by the scheduled job. ' +
+      '(Other sources still synced; only LinkedIn was skipped.)'
+    )
+  }
+
   await migrateOldSession()
   await mkdir(SESSION_DIR, { recursive: true })
 

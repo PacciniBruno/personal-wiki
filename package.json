@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "setup": "bash scripts/setup.sh",
+    "doctor": "node src/doctor.js",
     "bootstrap": "node src/index.js --mode=bootstrap",
     "sync": "node src/index.js --mode=sync",
     "init-kb": "node src/init-kb.js",

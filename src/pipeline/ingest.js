@@ -5,14 +5,32 @@
  * index.js calls this; it knows nothing about individual sources.
  */
 
+import { appendFile, mkdir } from 'fs/promises'
+import { join } from 'path'
 import { categorizeBatch } from '../categorize.js'
 import { writePosts, markRemoved } from '../writer.js'
 import { filterKnown } from './filters.js'
 import { getSourceKnownIds, updateStateWithItems, reconcileRemovedIds } from './dedupe.js'
+import { STATE_DIR } from '../config.js'
+
+const FETCH_FAILURES_LOG = join(STATE_DIR, 'ingest-failures.log')
 
 function progressBar(current, total, width = 24) {
   const filled = Math.round((current / total) * width)
   return '█'.repeat(filled) + '░'.repeat(width - filled)
+}
+
+// A source can fail while others succeed; index.js then still exits 0, which
+// hides the failure from the launchd stage stamp. Persist it so a partial or
+// silent ingest is diagnosable (`npm run doctor` surfaces this file).
+async function logFetchFailure(sourceLabel, err) {
+  const line = `${new Date().toISOString()}  ${sourceLabel}: ${err.message}\n`
+  try {
+    await mkdir(STATE_DIR, { recursive: true })
+    await appendFile(FETCH_FAILURES_LOG, line)
+  } catch {
+    // best-effort — never throw from the logger
+  }
 }
 
 /**
@@ -41,6 +59,7 @@ export async function ingest({ activeSources, mode, state }) {
       items = await source.fetch({ mode, state: state.sources[source.id], knownKeys: knownIds })
     } catch (err) {
       console.error(`\n⚠️  ${source.label}: fetch failed — ${err.message}`)
+      await logFetchFailure(source.label, err)
       continue
     }
 

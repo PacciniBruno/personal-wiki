@@ -16,8 +16,31 @@ npm run sync             # Incremental sync (new posts only) + wiki synthesis
 npm run update-wiki      # Re-run tier-1 wiki synthesis for all categories (manual)
 npm run update-wiki:cross# Run tier-2 cross-domain synthesis → synthesis.md (manual)
 npm run update-projects  # Re-run per-project wiki synthesis (manual)
+npm run doctor           # Health check — diagnoses why sync is dead
 DEBUG=1 npm run sync     # Verbose: logs all Voyager URLs, saves debug JSON files
 ```
+
+## Diagnosing a dead sync
+
+Run `npm run doctor` first — it reports node/claude resolution, the API key,
+KB freshness (newest `raw/` write, per-project `wiki.md` age), per-source dedup
+state, the daily run stamps, the LinkedIn cached-session age, and tails the
+failure logs, then prints a verdict.
+
+Common causes:
+- **LinkedIn session expired.** A scheduled (launchd) run cannot log in
+  interactively; it fails fast and skips LinkedIn (other sources still sync).
+  Fix: run `npm run sync` once in a terminal to refresh the session.
+- **`claude` not logged in.** Synthesis strips `ANTHROPIC_API_KEY` and uses the
+  subscription, so `claude /login` must be done or all wiki/project synthesis
+  fails while ingest still works.
+- **node not on launchd's PATH.** Re-run `npm run setup`.
+
+The runner scripts (`scripts/run-*.sh`) stamp a stage's success date only on
+success and retry transient failures on later launchd ticks (bounded by
+`SYNC_MAX_ATTEMPTS`, default 3; `SYNTH_RUN_MAX_ATTEMPTS`, default 2), so a
+single momentary failure no longer kills sync for the whole day. Failures are
+appended to `$STATE_DIR/{run,ingest,synth}-failures.log`.
 
 ## Architecture
 
@@ -121,11 +144,18 @@ ANTHROPIC_API_KEY=sk-ant-...
 
 ## Automation (launchd)
 
-Templates in `scripts/*.plist.template` — copy, fill in YOUR_USERNAME/YOUR_NODE_PATH/YOUR_PROJECT_PATH,
-then load with `launchctl load`.
+Run `npm run setup` (macOS only). It generates and loads two launchd agents,
+baking in the absolute node path and a PATH that includes it (so launchd's
+minimal environment can still find node):
 
-- `personal-wiki-sync` — daily: sync + tier-1 wiki update + per-project wiki update
-- `personal-wiki-synthesis` — daily: tier-2 synthesis
+- `com.$USER.personal-wiki-sync` — hourly tick: ingest + tier-1 wiki update +
+  per-project wiki update (`scripts/run-sync.sh`)
+- `com.$USER.personal-wiki-synthesis` — hourly tick: tier-2 synthesis
+  (`scripts/run-synthesis.sh`)
+
+Each script runs its stage at most once per day on success and retries transient
+failures on later ticks (see "Diagnosing a dead sync"). Logs:
+`~/Library/Logs/personal-wiki-*.log`.
 
 ## How the LinkedIn scraping works
 
