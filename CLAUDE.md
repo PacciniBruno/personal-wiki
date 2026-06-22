@@ -16,8 +16,32 @@ npm run sync             # Incremental sync (new posts only) + wiki synthesis
 npm run update-wiki      # Re-run tier-1 wiki synthesis for all categories (manual)
 npm run update-wiki:cross# Run tier-2 cross-domain synthesis → synthesis.md (manual)
 npm run update-projects  # Re-run per-project wiki synthesis (manual)
+npm run doctor           # Health check — diagnoses why sync is dead
 DEBUG=1 npm run sync     # Verbose: logs all Voyager URLs, saves debug JSON files
 ```
+
+## Diagnosing a dead sync
+
+Run `npm run doctor` first — it reports node/claude resolution, the API key,
+KB freshness (newest `raw/` write, per-project `wiki.md` age), per-source dedup
+state, the daily run stamps, the LinkedIn cached-session age, and tails the
+failure logs, then prints a verdict.
+
+Common causes:
+- **LinkedIn session expired.** A scheduled (launchd) run cannot log in
+  interactively; it fails fast and skips LinkedIn (other sources still sync).
+  Fix: run `npm run linkedin:refresh` (or `npm run sync`) once in a terminal to
+  refresh the session.
+- **`claude` not logged in.** Synthesis strips `ANTHROPIC_API_KEY` and uses the
+  subscription, so `claude /login` must be done or all wiki/project synthesis
+  fails while ingest still works.
+- **node not on launchd's PATH.** Re-run `npm run setup`.
+
+The runner scripts (`scripts/run-*.sh`) stamp the cheap ingest stage only on
+success — so a transient failure retries on the next hourly tick instead of
+killing sync for the whole day — while the costly `claude -p` stages (projects,
+tier-2) stamp before running and wait until tomorrow on failure. Failures are
+appended to `$STATE_DIR/{run,ingest,synth}-failures.log`.
 
 ## Architecture
 
@@ -125,10 +149,20 @@ ANTHROPIC_API_KEY=sk-ant-...
 
 ## Automation (launchd)
 
-`scripts/setup.sh` installs two launchd agents:
+Run `npm run setup` (macOS only). It generates and loads two launchd agents,
+baking in the absolute node path and a PATH that includes it (so launchd's
+minimal environment can still find node):
 
-- `personal-wiki-sync` — daily: sync + tier-1 wiki update + per-project wiki update
-- `personal-wiki-synthesis` — daily: tier-2 cross-domain synthesis
+- `com.$USER.personal-wiki-sync` — hourly tick: ingest + tier-1 wiki update +
+  per-project wiki update (`scripts/run-sync.sh`)
+- `com.$USER.personal-wiki-synthesis` — hourly tick: tier-2 synthesis
+  (`scripts/run-synthesis.sh`)
+
+Stamp policy (see "Diagnosing a dead sync"): the cheap ingest stage stamps only
+on success, so a transient failure retries on the next hourly tick; the costly
+`claude -p` stages (projects, tier-2 synthesis) stamp before running, so they
+run at most once per day and a failure waits for tomorrow. Logs:
+`~/Library/Logs/personal-wiki-*.log`.
 
 ## How the LinkedIn scraping works
 

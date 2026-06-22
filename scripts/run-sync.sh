@@ -16,19 +16,29 @@
 #     exhaustion, timeout) are non-transient and would burn tokens on each hourly
 #     retry. Wait for tomorrow.
 #
-# Synthesis failures append diagnostics to $STATE_DIR/synth-failures.log so you
-# can inspect them and re-run manually if needed.
+# Failures append to $STATE_DIR/run-failures.log (synthesis diagnostics to
+# $STATE_DIR/synth-failures.log) so a dead sync is diagnosable. Run
+# `npm run doctor` for a full health report.
 
 set -u
 
 STATE_DIR="${STATE_DIR:-$HOME/.personal-wiki}"
 TODAY=$(date +%Y-%m-%d)
+FAIL_LOG="$STATE_DIR/run-failures.log"
 
 mkdir -p "$STATE_DIR"
 
-NODE="$(command -v node)"
+NODE="$(command -v node || true)"
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$DIR"
+
+# launchd runs with a minimal PATH; if node isn't resolvable nothing runs and
+# the failure is otherwise invisible. Surface it loudly.
+if [ -z "$NODE" ]; then
+  echo "$(date '+%F %T') ❌ ingest+projects skipped: node not found in PATH ($PATH)" >> "$FAIL_LOG"
+  echo "❌ node not found in PATH. Re-run 'npm run setup' so launchd gets the right PATH."
+  exit 127
+fi
 
 # Run a stage if its stamp file isn't already today.
 # $1 label, $2 stamp filename, $3 stamp policy (always|on-success), rest = command
@@ -38,6 +48,7 @@ run_stage() {
   local policy="$3"
   shift 3
 
+  # Already succeeded today → nothing to do.
   if [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$TODAY" ]; then
     return 0
   fi
@@ -51,6 +62,7 @@ run_stage() {
     return 0
   else
     local rc=$?
+    echo "$(date '+%F %T') ⚠️  $label failed (exit $rc)" >> "$FAIL_LOG"
     if [ "$policy" = "on-success" ]; then
       echo "⚠️  $label failed (exit $rc) — will retry on the next hourly tick"
     else
