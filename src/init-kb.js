@@ -15,6 +15,7 @@ import { KB_DIR } from './config.js'
 export { KB_DIR }
 export const RAW_DIR       = join(KB_DIR, 'raw')
 export const WIKI_DIR      = join(KB_DIR, 'wiki')
+export const FACTS_DIR     = join(KB_DIR, 'facts')
 export const PROJECTS_DIR  = join(KB_DIR, 'projects')
 export const BRIEFINGS_DIR = join(KB_DIR, 'briefings')
 
@@ -56,6 +57,7 @@ and other sources. It uses the two-layer wiki pattern:
 
 - \`raw/\`   — source material, one file per topic, append-only
 - \`wiki/\`  — LLM-synthesized knowledge pages, updated daily after each sync
+- \`facts/\` — atomic, verifiable facts extracted from posts, one file per topic
 - \`synthesis.md\` — cross-domain patterns and helicopter view, updated weekly
 - \`projects/\` — per-project living docs (one folder per project; see \`projects/CLAUDE.md\`)
 - \`inbox/\` — auto-ingested web clips; processed items move to \`inbox/processed/\`
@@ -185,6 +187,22 @@ function wikiHeader(category) {
 `
 }
 
+function factsHeader(category) {
+  return `# ${category} — Facts
+
+> Atomic, verifiable facts extracted from raw posts during ingestion.
+> Append-only. One fact per line, each self-contained with source attribution.
+
+`
+}
+
+const AGENT_FACTS_MD = `# Agent-Derived Facts
+
+> Facts surfaced or synthesized by an agent while consulting the knowledge base.
+> Append-only. One fact per line, each self-contained with source attribution.
+
+`
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 export async function initKB() {
@@ -193,6 +211,7 @@ export async function initKB() {
   // Create directories
   await mkdir(RAW_DIR,       { recursive: true })
   await mkdir(WIKI_DIR,      { recursive: true })
+  await mkdir(FACTS_DIR,     { recursive: true })
   await mkdir(PROJECTS_DIR,  { recursive: true })
   await mkdir(BRIEFINGS_DIR, { recursive: true })
   await mkdir(join(KB_DIR, 'inbox'), { recursive: true })
@@ -208,9 +227,11 @@ export async function initKB() {
 
   // Topic files
   for (const { name, slug } of CATEGORIES) {
-    await writeIfMissing(join(RAW_DIR,  `${slug}.md`), rawHeader(name))
-    await writeIfMissing(join(WIKI_DIR, `${slug}.md`), wikiHeader(name))
+    await writeIfMissing(join(RAW_DIR,   `${slug}.md`), rawHeader(name))
+    await writeIfMissing(join(WIKI_DIR,  `${slug}.md`), wikiHeader(name))
+    await writeIfMissing(join(FACTS_DIR, `${slug}.md`), factsHeader(name))
   }
+  await writeIfMissing(join(FACTS_DIR, 'agent-derived.md'), AGENT_FACTS_MD)
 
   console.log('\n✅ Knowledge base ready at ~/knowledge/')
 }

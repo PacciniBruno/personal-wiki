@@ -1,38 +1,29 @@
 #!/bin/bash
-# Daily sync guard — runs each stage at most once per calendar day ON SUCCESS,
-# but retries transient failures on later launchd ticks. Called by launchd on
-# every hourly tick and on wake from sleep.
+# Daily sync guard — called by launchd on every hourly tick and on wake.
 #
-# Two independent stages, each with its own success/attempt bookkeeping in
-# $STATE_DIR:
+# Two stages, each gated by its own date-stamp in $STATE_DIR:
 #   1. ingest      → last-ingest-date     (src/index.js --mode=sync)
 #                    Internally runs tier-1 wiki synthesis for categories with
 #                    new posts — no separate tier-1 stage needed.
 #   2. projects    → last-projects-date   (src/synthesize-projects.js)
 #
-# Retry model (the fix for "sync seems dead"):
-#   - A stage that SUCCEEDS stamps today's date and is skipped for the rest of
-#     the day.
-#   - A stage that FAILS is retried on the next tick, up to SYNC_MAX_ATTEMPTS
-#     times per calendar day (default 3), then left until tomorrow.
-# This bounds worst-case cost (a persistent `claude -p` budget/credit failure
-# burns at most SYNC_MAX_ATTEMPTS runs, not 24) while letting genuinely
-# transient failures — network not ready on wake, a momentary LinkedIn hiccup —
-# self-heal instead of killing sync for the whole day.
+# Stamp policy:
+#   - Ingest stamps only on SUCCESS. A transient failure (LinkedIn glitch,
+#     network blip, API throttle) gets a fresh shot next hour. The ingest path
+#     is cheap when there's nothing new — categorization only fires on truly
+#     new items — so hourly retries are safe.
+#   - Projects stamps on EVERY attempt. `claude -p` failures (budget cap, credit
+#     exhaustion, timeout) are non-transient and would burn tokens on each hourly
+#     retry. Wait for tomorrow.
 #
-# Ingest re-runs are cheap and safe: items already written are recorded in
-# state.json, so a retry only processes posts that are still new, and tier-1
-# synthesis only runs for categories that actually received new posts.
-#
-# Failures are appended to $STATE_DIR/run-failures.log (and synthesis failures
-# to $STATE_DIR/synth-failures.log) so a dead sync is diagnosable. Run
+# Failures append to $STATE_DIR/run-failures.log (synthesis diagnostics to
+# $STATE_DIR/synth-failures.log) so a dead sync is diagnosable. Run
 # `npm run doctor` for a full health report.
 
 set -u
 
 STATE_DIR="${STATE_DIR:-$HOME/.personal-wiki}"
 TODAY=$(date +%Y-%m-%d)
-MAX_ATTEMPTS="${SYNC_MAX_ATTEMPTS:-3}"
 FAIL_LOG="$STATE_DIR/run-failures.log"
 
 mkdir -p "$STATE_DIR"
@@ -49,52 +40,42 @@ if [ -z "$NODE" ]; then
   exit 127
 fi
 
-# Run "$@" if the stage hasn't already succeeded today and still has attempts
-# left. Stamps the success date on success; records the attempt either way.
-#   $1 = label   $2 = stamp basename (without dir)
+# Run a stage if its stamp file isn't already today.
+# $1 label, $2 stamp filename, $3 stamp policy (always|on-success), rest = command
 run_stage() {
   local label="$1"
-  local base="$2"
-  shift 2
-  local done_stamp="$STATE_DIR/$base"
-  local attempt_stamp="$STATE_DIR/$base.attempts"
+  local stamp="$STATE_DIR/$2"
+  local policy="$3"
+  shift 3
 
   # Already succeeded today → nothing to do.
-  if [ -f "$done_stamp" ] && [ "$(cat "$done_stamp")" = "$TODAY" ]; then
+  if [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$TODAY" ]; then
     return 0
   fi
 
-  # Read today's attempt count (resets when the date rolls over).
-  local a_day="" a_n=0
-  if [ -f "$attempt_stamp" ]; then
-    read -r a_day a_n < "$attempt_stamp" || true
+  echo "──── $label ────"
+  if [ "$policy" = "always" ]; then
+    echo "$TODAY" > "$stamp"
   fi
-  [ "$a_day" = "$TODAY" ] || a_n=0
-
-  if [ "$a_n" -ge "$MAX_ATTEMPTS" ]; then
-    return 0   # exhausted today's attempts — wait for tomorrow
-  fi
-
-  local attempt=$((a_n + 1))
-  echo "$TODAY $attempt" > "$attempt_stamp"
-
-  echo "──── $label (attempt $attempt/$MAX_ATTEMPTS) ────"
-  "$@"
-  local rc=$?
-  if [ "$rc" -eq 0 ]; then
-    echo "$TODAY" > "$done_stamp"
+  if "$@"; then
+    [ "$policy" = "on-success" ] && echo "$TODAY" > "$stamp"
     return 0
+  else
+    local rc=$?
+    echo "$(date '+%F %T') ⚠️  $label failed (exit $rc)" >> "$FAIL_LOG"
+    if [ "$policy" = "on-success" ]; then
+      echo "⚠️  $label failed (exit $rc) — will retry on the next hourly tick"
+    else
+      echo "⚠️  $label failed (exit $rc) — will retry tomorrow, not this hour"
+    fi
+    return $rc
   fi
-
-  echo "$(date '+%F %T') ⚠️  $label failed (exit $rc), attempt $attempt/$MAX_ATTEMPTS" >> "$FAIL_LOG"
-  echo "⚠️  $label failed (exit $rc) — will retry on the next tick ($attempt/$MAX_ATTEMPTS today)"
-  return $rc
 }
 
 # Track whether any stage failed so we surface a non-zero overall exit.
 overall=0
 
-run_stage "ingest"   last-ingest-date   "$NODE" src/index.js --mode=sync   || overall=1
-run_stage "projects" last-projects-date "$NODE" src/synthesize-projects.js || overall=1
+run_stage "ingest"   last-ingest-date   on-success "$NODE" src/index.js --mode=sync   || overall=1
+run_stage "projects" last-projects-date always     "$NODE" src/synthesize-projects.js || overall=1
 
 exit $overall

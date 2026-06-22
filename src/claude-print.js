@@ -85,13 +85,11 @@ async function logFailure({ prompt, stdout, stderr, code, parsed, reason }) {
 /**
  * @param {string} prompt
  * @param {number} timeoutMs
- * @param {{ tools?: 'default'|'none' }} [options]
- *   - 'default' (the default): agentic mode, ALLOWED_TOOLS list active
- *   - 'none': pure text-in/text-out, no tool calls. Use this when the entire
- *     input is inlined in the prompt — avoids the multi-turn cache-write churn
- *     that drove tier-2's cost.
+ * @param {{ tools?: 'default'|'none', model?: string }} [options]
+ *   - tools: 'default' agentic mode (ALLOWED_TOOLS), 'none' text-in/text-out
+ *   - model: per-call model override (default: $SYNTH_MODEL or 'sonnet')
  */
-export function claudePrint(prompt, timeoutMs, { tools = 'default' } = {}) {
+export function claudePrint(prompt, timeoutMs, { tools = 'default', model } = {}) {
   return new Promise((resolve, reject) => {
     const toolArgs = tools === 'none'
       ? ['--tools', '']
@@ -99,7 +97,7 @@ export function claudePrint(prompt, timeoutMs, { tools = 'default' } = {}) {
 
     const child = spawn(CLAUDE_BIN, [
       '--print',
-      '--model', process.env.SYNTH_MODEL ?? 'sonnet',
+      '--model', model ?? process.env.SYNTH_MODEL ?? 'sonnet',
       '--max-budget-usd', process.env.SYNTH_MAX_USD ?? '0.50',
       '--output-format', 'json',
       '--setting-sources', 'user',

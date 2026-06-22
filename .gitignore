@@ -25,3 +25,6 @@ prompts/
 
 # Skill bundles — generated artifacts
 skills/*.zip
+
+# Fiberplane local issue tracking
+.fp/

@@ -36,10 +36,10 @@ Common causes:
   fails while ingest still works.
 - **node not on launchd's PATH.** Re-run `npm run setup`.
 
-The runner scripts (`scripts/run-*.sh`) stamp a stage's success date only on
-success and retry transient failures on later launchd ticks (bounded by
-`SYNC_MAX_ATTEMPTS`, default 3; `SYNTH_RUN_MAX_ATTEMPTS`, default 2), so a
-single momentary failure no longer kills sync for the whole day. Failures are
+The runner scripts (`scripts/run-*.sh`) stamp the cheap ingest stage only on
+success — so a transient failure retries on the next hourly tick instead of
+killing sync for the whole day — while the costly `claude -p` stages (projects,
+tier-2) stamp before running and wait until tomorrow on failure. Failures are
 appended to `$STATE_DIR/{run,ingest,synth}-failures.log`.
 
 ## Architecture
@@ -54,9 +54,10 @@ src/
     parser.js      Paginates via native fetch(), parses Voyager responses → SourceItems.
     index.js       SourceAdapter: orchestrates session + parser.
   categorize.js    Claude Haiku (claude-haiku-4-5-20251001). Returns category,
-                   subcategory, tags[], summary per post. 150ms delay.
+                   subcategory, tags[], summary, facts[] per post. 150ms delay.
   state.js         Loads/saves $STATE_DIR/state.json (knownKeys for dedup).
-  writer.js        Appends formatted post entries to $KB_DIR/raw/{slug}.md.
+  writer.js        Appends formatted post entries to $KB_DIR/raw/{slug}.md and
+                   extracted facts to $KB_DIR/facts/{slug}.md.
                    Updates index.md counts. Appends to log.md.
   init-kb.js       Creates knowledge base folder structure. Idempotent.
   claude-print.js  Spawns `claude -p` with prompt fed via stdin. Shared by
@@ -97,6 +98,9 @@ $KB_DIR/  (default: ~/knowledge/)
     sales-business-dev.md
     startup-entrepreneurship.md
   wiki/                 # LLM-synthesized living pages (same filenames as raw/)
+  facts/                # Atomic, verifiable facts, one file per category
+    {category}.md       # Facts extracted from posts during categorization
+    agent-derived.md    # Facts added by agents while consulting the KB
   projects/             # Per-project living docs (orthogonal to themes)
     CLAUDE.md           # Layout and conventions for the projects subtree
     {name}/
@@ -153,8 +157,10 @@ minimal environment can still find node):
 - `com.$USER.personal-wiki-synthesis` — hourly tick: tier-2 synthesis
   (`scripts/run-synthesis.sh`)
 
-Each script runs its stage at most once per day on success and retries transient
-failures on later ticks (see "Diagnosing a dead sync"). Logs:
+Stamp policy (see "Diagnosing a dead sync"): the cheap ingest stage stamps only
+on success, so a transient failure retries on the next hourly tick; the costly
+`claude -p` stages (projects, tier-2 synthesis) stamp before running, so they
+run at most once per day and a failure waits for tomorrow. Logs:
 `~/Library/Logs/personal-wiki-*.log`.
 
 ## How the LinkedIn scraping works
@@ -188,3 +194,5 @@ then update `extractElements()` and `looksLikePost()` in `src/sources/linkedin/p
   (`?variables=(start:N,...)`), and cursor-based pagination. LinkedIn changes this.
 - **Dedup key** — `post.uniqueKey` = URL if available, else URN. Stored in state.json.
   Sync stops on first post whose uniqueKey is in knownKeys.
+
+@FP_CLAUDE.md

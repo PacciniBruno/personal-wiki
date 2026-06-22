@@ -44,21 +44,28 @@ ${titleLine}Content:
 ${textSnippet}
 """
 
-Assign a category, subcategory, tags and summary using this exact JSON schema.
+Assign a category, subcategory, tags, summary and facts using this exact JSON schema.
 Categories (pick exactly one):
 ${CATEGORIES.map((c, i) => `${i + 1}. ${c}`).join('\n')}
+
+For "facts": extract 0-5 concrete, verifiable, self-contained factual claims
+stated in the content — statistics, events, definitions, named methods or tools,
+causal claims. Each fact must be a complete sentence understandable on its own
+without the original post (resolve pronouns, name the subject explicitly). Return
+an empty array if the content is pure opinion, advice, or too vague for checkable facts.
 
 Respond with ONLY valid JSON, no markdown, no explanation:
 {
   "category": "<one category from the list>",
   "subcategory": "<specific sub-theme, 2-4 words, in English>",
   "tags": ["<tag1>", "<tag2>", "<tag3>"],
-  "summary": "<key insight or takeaway in 1-2 sentences>"
+  "summary": "<key insight or takeaway in 1-2 sentences>",
+  "facts": ["<atomic, self-contained fact>", "..."]
 }`
 
   const message = await client.messages.create({
     model: 'claude-haiku-4-5-20251001',
-    max_tokens: 300,
+    max_tokens: 700,
     messages: [{ role: 'user', content: prompt }],
   })
 
@@ -73,8 +80,10 @@ Respond with ONLY valid JSON, no markdown, no explanation:
   }
 
   if (!CATEGORIES.includes(json.category)) json.category = 'Other'
-  if (!Array.isArray(json.tags)) json.tags = []
-  json.tags = json.tags.slice(0, 3).map(t => String(t).trim()).filter(Boolean)
+  if (!Array.isArray(json.tags))  json.tags  = []
+  if (!Array.isArray(json.facts)) json.facts = []
+  json.tags  = json.tags.slice(0, 3).map(t => String(t).trim()).filter(Boolean)
+  json.facts = json.facts.slice(0, 5).map(f => String(f).trim()).filter(Boolean)
   json.subcategory = (json.subcategory ?? '').trim()
   json.summary     = (json.summary     ?? '').trim()
 
@@ -86,7 +95,7 @@ Respond with ONLY valid JSON, no markdown, no explanation:
  *
  * @param {import('./sources/types.js').SourceItem[]} items
  * @param {{ onProgress?: (n: number, total: number) => void }} options
- * @returns {Promise<Array<import('./sources/types.js').SourceItem & { category: string, subcategory: string, tags: string[], summary: string }>>}
+ * @returns {Promise<Array<import('./sources/types.js').SourceItem & { category: string, subcategory: string, tags: string[], summary: string, facts: string[] }>>}
  */
 export async function categorizeBatch(items, { onProgress } = {}) {
   const results = []
@@ -101,7 +110,7 @@ export async function categorizeBatch(items, { onProgress } = {}) {
       console.error(`\n⚠️  Categorization failed for item ${i + 1}: ${err.message}`)
       results.push({
         ...item,
-        category: 'Other', subcategory: '', tags: [], summary: '',
+        category: 'Other', subcategory: '', tags: [], summary: '', facts: [],
       })
     }
 

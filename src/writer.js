@@ -7,7 +7,7 @@
 
 import { appendFile, readFile, writeFile } from 'fs/promises'
 import { join } from 'path'
-import { KB_DIR, RAW_DIR, WIKI_DIR, CATEGORIES, categoryToSlug, initKB } from './init-kb.js'
+import { KB_DIR, RAW_DIR, WIKI_DIR, FACTS_DIR, CATEGORIES, categoryToSlug, initKB } from './init-kb.js'
 
 const INDEX_FILE = join(KB_DIR, 'index.md')
 const LOG_FILE   = join(KB_DIR, 'log.md')
@@ -42,6 +42,16 @@ function formatDate(isoString) {
   } catch {
     return new Date().toISOString().slice(0, 10)
   }
+}
+
+// ─── Format a post's extracted facts as markdown bullets ─────────────────────
+
+function formatFacts(post) {
+  if (!post.facts?.length) return ''
+  const date   = formatDate(post.savedAt ?? post.createdAt ?? new Date().toISOString())
+  const author = post.author?.trim() || 'Unknown'
+  const src    = post.url ? ` — ${post.url}` : ''
+  return post.facts.map(f => `- ${f} — ${author}, ${date}${src}`).join('\n') + '\n'
 }
 
 // ─── Update index.md post counts ─────────────────────────────────────────────
@@ -104,6 +114,10 @@ export async function writePosts(posts) {
 
     const entry = formatEntry(post)
     await appendFile(rawFile, entry, 'utf8')
+
+    // Extracted facts → facts/{slug}.md
+    const facts = formatFacts(post)
+    if (facts) await appendFile(join(FACTS_DIR, `${slug}.md`), facts, 'utf8')
 
     // Log entry
     const date   = new Date().toISOString().slice(0, 10)
