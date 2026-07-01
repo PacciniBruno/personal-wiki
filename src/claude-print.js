@@ -44,9 +44,8 @@ const ALLOWED_TOOLS = [
 const FAILURES_LOG = join(STATE_DIR, 'synth-failures.log')
 
 // Env vars that, if present, route `claude` to API billing instead of the
-// user's Claude subscription. We strip them from the child env so synthesis
-// always uses the subscription. The Haiku categorizer (categorize.js) uses
-// the Anthropic SDK directly and is unaffected.
+// user's Claude subscription. We strip them from the child env so every
+// `claude -p` call (synthesis AND categorization) uses the subscription.
 const API_AUTH_ENV_KEYS = [
   'ANTHROPIC_API_KEY',
   'ANTHROPIC_AUTH_TOKEN',
@@ -57,9 +56,24 @@ const API_AUTH_ENV_KEYS = [
   'CLAUDE_CODE_USE_VERTEX',
 ]
 
+// When this runs *inside* a Claude Code / Claude Desktop session (e.g. sync
+// launched from the desktop app), the host injects OAuth vars that make the
+// spawned `claude` expect a host-provided token refresh — with no host to
+// supply it, that surfaces as a spurious `401 Invalid authentication
+// credentials`. Stripping them forces the child onto the Keychain
+// subscription. A clean launchd/terminal env doesn't have these, so removing
+// them there is a harmless no-op.
+const HOST_AUTH_ENV_KEYS = [
+  'CLAUDE_CODE_SDK_HAS_OAUTH_REFRESH',
+  'CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH',
+  'CLAUDE_CODE_OAUTH_SCOPES',
+  'CLAUDE_CODE_ENTRYPOINT',
+]
+
 function subscriptionEnv() {
   const env = { ...process.env }
-  for (const k of API_AUTH_ENV_KEYS) delete env[k]
+  for (const k of API_AUTH_ENV_KEYS)  delete env[k]
+  for (const k of HOST_AUTH_ENV_KEYS) delete env[k]
   return env
 }
 
@@ -85,11 +99,14 @@ async function logFailure({ prompt, stdout, stderr, code, parsed, reason }) {
 /**
  * @param {string} prompt
  * @param {number} timeoutMs
- * @param {{ tools?: 'default'|'none', model?: string }} [options]
+ * @param {{ tools?: 'default'|'none', model?: string, maxBudgetUsd?: string }} [options]
  *   - tools: 'default' agentic mode (ALLOWED_TOOLS), 'none' text-in/text-out
  *   - model: per-call model override (default: $SYNTH_MODEL or 'sonnet')
+ *   - maxBudgetUsd: per-call cost ceiling (default: $SYNTH_MAX_USD or '3.00').
+ *     Categorization passes a low cap; project synthesis (heaviest inputs)
+ *     passes a higher one.
  */
-export function claudePrint(prompt, timeoutMs, { tools = 'default', model } = {}) {
+export function claudePrint(prompt, timeoutMs, { tools = 'default', model, maxBudgetUsd } = {}) {
   return new Promise((resolve, reject) => {
     const toolArgs = tools === 'none'
       ? ['--tools', '']
@@ -98,7 +115,7 @@ export function claudePrint(prompt, timeoutMs, { tools = 'default', model } = {}
     const child = spawn(CLAUDE_BIN, [
       '--print',
       '--model', model ?? process.env.SYNTH_MODEL ?? 'sonnet',
-      '--max-budget-usd', process.env.SYNTH_MAX_USD ?? '0.50',
+      '--max-budget-usd', maxBudgetUsd ?? process.env.SYNTH_MAX_USD ?? '3.00',
       '--output-format', 'json',
       '--setting-sources', 'user',
       ...toolArgs,

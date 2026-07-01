@@ -2,11 +2,15 @@
  * categorize.js
  *
  * Uses Claude Haiku to categorize each item regardless of source.
- * Returns category, subcategory, tags[], and summary per item.
+ * Returns category, subcategory, tags[], summary and facts[] per item.
+ *
+ * Runs via `claude -p --model haiku` (Claude subscription), the same auth path
+ * as synthesis — so ingest never depends on the ANTHROPIC_API_KEY credit
+ * balance.
  */
 
-import Anthropic from '@anthropic-ai/sdk'
 import { USER_CONTEXT } from './config.js'
+import { claudePrint } from './claude-print.js'
 
 const CATEGORIES = [
   'Investing & Finance',        // VC, angel, fundraising, personal finance
@@ -21,7 +25,6 @@ const CATEGORIES = [
   'Other',
 ]
 
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 
 /**
@@ -63,18 +66,19 @@ Respond with ONLY valid JSON, no markdown, no explanation:
   "facts": ["<atomic, self-contained fact>", "..."]
 }`
 
-  const message = await client.messages.create({
-    model: 'claude-haiku-4-5-20251001',
-    max_tokens: 700,
-    messages: [{ role: 'user', content: prompt }],
+  // tools 'none' + inlined input: pure text-in/JSON-out, no file access needed.
+  const text = await claudePrint(prompt, 60_000, {
+    tools: 'none',
+    model: 'haiku',
+    maxBudgetUsd: '0.10',
   })
 
   let json
   try {
-    json = JSON.parse(message.content[0].text.trim())
+    json = JSON.parse(text.trim())
   } catch {
     // Haiku occasionally wraps JSON in text — extract it
-    const match = message.content[0].text.match(/\{[\s\S]*\}/)
+    const match = text.match(/\{[\s\S]*\}/)
     if (!match) throw new Error('Claude returned invalid JSON')
     json = JSON.parse(match[0])
   }

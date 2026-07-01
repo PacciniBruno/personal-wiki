@@ -23,16 +23,6 @@ const args       = process.argv.slice(2)
 const mode       = args.find(a => a.startsWith('--mode='))?.split('=')[1]   ?? 'sync'
 const sourceArg  = args.find(a => a.startsWith('--source='))?.split('=')[1] ?? null
 
-// ─── Env validation ──────────────────────────────────────────────────────────
-
-function validateEnv() {
-  if (!process.env.ANTHROPIC_API_KEY) {
-    console.error('\n❌ ANTHROPIC_API_KEY is missing from .env')
-    console.error('   Get one at https://console.anthropic.com\n')
-    process.exit(1)
-  }
-}
-
 // ─── Source selection ─────────────────────────────────────────────────────────
 
 function selectSources() {
@@ -73,8 +63,6 @@ async function main() {
   console.log('\n╔═══════════════════════════════════════╗')
   console.log('║       Personal Wiki  📚               ║')
   console.log('╚═══════════════════════════════════════╝\n')
-
-  validateEnv()
 
   const activeSources = selectSources()
   const kbPath = KB_DIR.replace(process.env.HOME ?? '', '~')
