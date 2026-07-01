@@ -99,18 +99,22 @@ async function logFailure({ prompt, stdout, stderr, code, parsed, reason }) {
 /**
  * @param {string} prompt
  * @param {number} timeoutMs
- * @param {{ tools?: 'default'|'none', model?: string, maxBudgetUsd?: string }} [options]
+ * @param {{ tools?: 'default'|'none', model?: string, maxBudgetUsd?: string, allowedTools?: string[] }} [options]
  *   - tools: 'default' agentic mode (ALLOWED_TOOLS), 'none' text-in/text-out
  *   - model: per-call model override (default: $SYNTH_MODEL or 'sonnet')
  *   - maxBudgetUsd: per-call cost ceiling (default: $SYNTH_MAX_USD or '3.00').
  *     Categorization passes a low cap; project synthesis (heaviest inputs)
  *     passes a higher one.
+ *   - allowedTools: explicit tool allowlist that replaces ALLOWED_TOOLS — used
+ *     to grant an MCP server (e.g. ['mcp__xapi', 'Write'] for the X bookmarks
+ *     fetch). `--setting-sources user` already loads user-scoped MCP servers.
  */
-export function claudePrint(prompt, timeoutMs, { tools = 'default', model, maxBudgetUsd } = {}) {
+export function claudePrint(prompt, timeoutMs, { tools = 'default', model, maxBudgetUsd, allowedTools } = {}) {
   return new Promise((resolve, reject) => {
-    const toolArgs = tools === 'none'
-      ? ['--tools', '']
-      : ['--allowedTools', ...ALLOWED_TOOLS]
+    const toolArgs =
+      allowedTools    ? ['--allowedTools', ...allowedTools] :
+      tools === 'none' ? ['--tools', ''] :
+                         ['--allowedTools', ...ALLOWED_TOOLS]
 
     const child = spawn(CLAUDE_BIN, [
       '--print',

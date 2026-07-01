@@ -27,7 +27,7 @@ const sourceArg  = args.find(a => a.startsWith('--source='))?.split('=')[1] ?? n
 
 function selectSources() {
   if (!sourceArg) {
-    const defaultIds = ['linkedin', 'web', 'apple-notes']
+    const defaultIds = ['linkedin', 'twitter', 'web', 'apple-notes']
     return defaultIds
       .map(id => getSourceById(id))
       .filter(source => source?.isEnabled(config))
