@@ -140,7 +140,10 @@ export async function runProjectSynthesis({ only, since } = {}) {
   const results = await runWithLimit(targets, MAX_CONCURRENCY, async p => {
     const prompt = buildProjectPrompt(p, sinceDate)
     try {
-      await claudePrint(prompt, 300_000)
+      // Projects pull in their linked themes' full raw/ files, so they're the
+      // heaviest synthesis inputs — give them a higher budget cap than the
+      // per-category default.
+      await claudePrint(prompt, 300_000, { maxBudgetUsd: process.env.SYNTH_PROJECT_MAX_USD ?? '6.00' })
       state.projects[p.name] = { lastSyncedAt: new Date().toISOString() }
       process.stdout.write(`   ✅ ${p.name}\n`)
     } catch (err) {

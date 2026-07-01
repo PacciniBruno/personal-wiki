@@ -5,7 +5,9 @@
  * Override any value by setting the corresponding env var in .env.
  *
  * Required:
- *   ANTHROPIC_API_KEY — get one at https://console.anthropic.com
+ *   A logged-in `claude` CLI — categorization and synthesis both run through
+ *   `claude -p` on the Claude subscription. (ANTHROPIC_API_KEY is optional and
+ *   currently unused by the pipeline.)
  *
  * Optional (paths):
  *   KB_DIR            — knowledge base root      (default: ~/knowledge)
