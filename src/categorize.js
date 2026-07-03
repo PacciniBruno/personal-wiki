@@ -27,6 +27,45 @@ const CATEGORIES = [
 
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 
+// The neutral fallback shape, reused by the empty-item short-circuit and by
+// categorizeBatch's catch. Kept as a factory so callers never share an array.
+const emptyResult = () => ({ category: 'Other', subcategory: '', tags: [], summary: '', facts: [] })
+
+/**
+ * Pulls a JSON object out of a model reply that may be fenced or prefaced.
+ * Tolerant, mirroring the line-by-line JSONL parsing in sources/twitter/index.js:
+ * strip a ```json fence, try a straight parse, then fall back to the outermost
+ * {...} span. Throws only when nothing JSON-shaped is present.
+ */
+function extractJson(text) {
+  const unfenced = String(text ?? '')
+    .trim()
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/, '')
+    .trim()
+
+  try {
+    return JSON.parse(unfenced)
+  } catch {
+    const start = unfenced.indexOf('{')
+    const end   = unfenced.lastIndexOf('}')
+    if (start === -1 || end <= start) throw new Error('Claude returned invalid JSON')
+    return JSON.parse(unfenced.slice(start, end + 1))
+  }
+}
+
+/** Coerces a parsed object into the canonical result shape. */
+function normalize(json) {
+  if (!CATEGORIES.includes(json.category)) json.category = 'Other'
+  if (!Array.isArray(json.tags))  json.tags  = []
+  if (!Array.isArray(json.facts)) json.facts = []
+  json.tags  = json.tags.slice(0, 3).map(t => String(t).trim()).filter(Boolean)
+  json.facts = json.facts.slice(0, 5).map(f => String(f).trim()).filter(Boolean)
+  json.subcategory = (json.subcategory ?? '').trim()
+  json.summary     = (json.summary     ?? '').trim()
+  return json
+}
+
 /**
  * Categorizes a single item via Claude Haiku.
  *
@@ -37,6 +76,13 @@ export async function categorizeItem(item) {
   const titleLine   = item.title ? `Title: ${item.title}\n` : ''
   // Remove lone surrogates (invalid UTF-16) that break JSON serialization
   const textSnippet = (item.text ?? '').slice(0, 1500).replace(/[\uD800-\uDFFF]/g, '')
+
+  // Link-only / empty items (common with X bookmarks whose text is just a t.co
+  // URL) give Haiku nothing to categorize — and often draw a malformed reply.
+  // Short-circuit to the neutral result instead of burning a call that lands
+  // in "Other" anyway.
+  const meaningful = textSnippet.replace(/https?:\/\/\S+/g, '').trim()
+  if (!meaningful && !item.title) return emptyResult()
 
   const prompt = `You are categorizing a saved item for ${USER_CONTEXT}.
 
@@ -67,31 +113,17 @@ Respond with ONLY valid JSON, no markdown, no explanation:
 }`
 
   // tools 'none' + inlined input: pure text-in/JSON-out, no file access needed.
-  const text = await claudePrint(prompt, 60_000, {
-    tools: 'none',
-    model: 'haiku',
-    maxBudgetUsd: '0.10',
-  })
+  // One retry: a first attempt can fail transiently (claudePrint rejects on an
+  // Overloaded/API error) or return truncated/malformed JSON (extractJson
+  // throws). Both are worth re-asking once before falling back to "Other".
+  const ask = () => claudePrint(prompt, 60_000, { tools: 'none', model: 'haiku', maxBudgetUsd: '0.10' })
 
-  let json
   try {
-    json = JSON.parse(text.trim())
+    return normalize(extractJson(await ask()))
   } catch {
-    // Haiku occasionally wraps JSON in text — extract it
-    const match = text.match(/\{[\s\S]*\}/)
-    if (!match) throw new Error('Claude returned invalid JSON')
-    json = JSON.parse(match[0])
+    await sleep(500)
+    return normalize(extractJson(await ask()))
   }
-
-  if (!CATEGORIES.includes(json.category)) json.category = 'Other'
-  if (!Array.isArray(json.tags))  json.tags  = []
-  if (!Array.isArray(json.facts)) json.facts = []
-  json.tags  = json.tags.slice(0, 3).map(t => String(t).trim()).filter(Boolean)
-  json.facts = json.facts.slice(0, 5).map(f => String(f).trim()).filter(Boolean)
-  json.subcategory = (json.subcategory ?? '').trim()
-  json.summary     = (json.summary     ?? '').trim()
-
-  return json
 }
 
 /**
@@ -112,10 +144,7 @@ export async function categorizeBatch(items, { onProgress } = {}) {
       results.push({ ...item, ...cat })
     } catch (err) {
       console.error(`\n⚠️  Categorization failed for item ${i + 1}: ${err.message}`)
-      results.push({
-        ...item,
-        category: 'Other', subcategory: '', tags: [], summary: '', facts: [],
-      })
+      results.push({ ...item, ...emptyResult() })
     }
 
     onProgress?.(i + 1, items.length)
