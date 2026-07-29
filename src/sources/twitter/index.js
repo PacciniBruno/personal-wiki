@@ -2,8 +2,9 @@
  * sources/twitter/index.js — X (Twitter) bookmarks adapter, via the xapi MCP.
  *
  * The old Puppeteer/GraphQL path couldn't get past X's login in headless
- * Chromium. This instead delegates to `claude -p` with the user-scoped `xapi`
- * MCP server (official X API) enabled, calling `mcp__xapi__get_users_bookmarks`.
+ * Chromium. This instead delegates to `claude -p` with the `xapi` MCP server
+ * (official X API) injected per-call via --mcp-config, calling
+ * `mcp__xapi__get_users_bookmarks`.
  * The agent writes the bookmarks as JSONL (one JSON object per line) to a temp
  * file in KB_DIR; Node reads it line-by-line — robust to a single malformed
  * line and to large backfills (no giant JSON blob re-emitted as output tokens).
@@ -26,11 +27,32 @@
 
 import { readFile, unlink } from 'fs/promises'
 import { join } from 'path'
-import { KB_DIR, TWITTER_MAX_AGE_DAYS } from '../../config.js'
+import { KB_DIR, TWITTER_MAX_AGE_DAYS, XURL_BIN } from '../../config.js'
 import { claudePrint } from '../../claude-print.js'
 
 const TMP_BASENAME = 'tmp-twitter-bookmarks.jsonl'  // NOT a dotfile: Write prompts on hidden files
 const BOOTSTRAP_MAX_PAGES = 8   // 8 * 100 ≈ 800 bookmarks upper bound
+
+// The X API MCP server, injected per-call via --mcp-config rather than being a
+// globally-registered (user-scoped) server in ~/.claude.json. Keeping it out of
+// the global config stops `xurl mcp` from auto-launching — and popping an
+// interactive OAuth browser tab when a rotating refresh token can't be reused —
+// in every unrelated Claude Code session. Only this pipeline loads it. Auth/app
+// config still lives in ~/.xurl (app "xapi").
+// Launched via the resolved absolute path to the installed xurl binary, not
+// `npx -y @xdevplatform/xurl`. npx needs a network fetch when the package isn't
+// installed, which silently failed under launchd (minimal PATH, cold npm cache)
+// and produced 14 days of "MCP unavailable or returned nothing" while the X
+// credentials themselves were fine. Install with: npm i -g @xdevplatform/xurl
+const XAPI_MCP_CONFIG = JSON.stringify({
+  mcpServers: {
+    xapi: {
+      type: 'stdio',
+      command: XURL_BIN,
+      args: ['--app', 'xapi', 'mcp', 'https://api.x.com/mcp'],
+    },
+  },
+})
 
 function buildPrompt({ mode, cutoffISO }) {
   const paginate = mode === 'bootstrap'
@@ -98,7 +120,10 @@ export const source = {
   supportsRemovedDetection: false,
 
   isEnabled(_config) {
-    return true // relies on the user-scoped `xapi` MCP; fails gracefully if absent
+    // Uses the `xapi` MCP injected below; fails gracefully if auth is absent.
+    // Set TWITTER_ENABLED=false in .env to skip it entirely — useful while the
+    // xapi auth is broken, so it stops appending a failure line every run.
+    return process.env.TWITTER_ENABLED !== 'false'
   },
 
   async fetch({ mode, knownKeys }) {
@@ -110,6 +135,7 @@ export const source = {
 
     await claudePrint(buildPrompt({ mode, cutoffISO }), mode === 'bootstrap' ? 900_000 : 420_000, {
       allowedTools: ['mcp__xapi', 'Write'],
+      mcpConfig:    XAPI_MCP_CONFIG,
       model:        process.env.TWITTER_FETCH_MODEL ?? 'sonnet',
       maxBudgetUsd,
     })

@@ -107,14 +107,21 @@ async function logFailure({ prompt, stdout, stderr, code, parsed, reason }) {
  *     passes a higher one.
  *   - allowedTools: explicit tool allowlist that replaces ALLOWED_TOOLS — used
  *     to grant an MCP server (e.g. ['mcp__xapi', 'Write'] for the X bookmarks
- *     fetch). `--setting-sources user` already loads user-scoped MCP servers.
+ *     fetch).
+ *   - mcpConfig: JSON string of MCP servers to load for this call only, passed
+ *     via `--mcp-config` + `--strict-mcp-config`. Used by the X bookmarks fetch
+ *     so `xapi` doesn't need to be a globally-registered (user-scoped) server —
+ *     which would auto-launch `xurl mcp` (and its interactive OAuth browser
+ *     popup) in every unrelated Claude Code session.
  */
-export function claudePrint(prompt, timeoutMs, { tools = 'default', model, maxBudgetUsd, allowedTools } = {}) {
+export function claudePrint(prompt, timeoutMs, { tools = 'default', model, maxBudgetUsd, allowedTools, mcpConfig } = {}) {
   return new Promise((resolve, reject) => {
     const toolArgs =
       allowedTools    ? ['--allowedTools', ...allowedTools] :
       tools === 'none' ? ['--tools', ''] :
                          ['--allowedTools', ...ALLOWED_TOOLS]
+
+    const mcpArgs = mcpConfig ? ['--mcp-config', mcpConfig, '--strict-mcp-config'] : []
 
     const child = spawn(CLAUDE_BIN, [
       '--print',
@@ -123,6 +130,7 @@ export function claudePrint(prompt, timeoutMs, { tools = 'default', model, maxBu
       '--output-format', 'json',
       '--setting-sources', 'user',
       ...toolArgs,
+      ...mcpArgs,
     ], { timeout: timeoutMs, cwd: KB_DIR, env: subscriptionEnv() })
 
     let stdout = ''

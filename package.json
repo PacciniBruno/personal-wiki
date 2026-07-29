@@ -12,7 +12,9 @@
     "update-wiki": "node src/synthesize.js --tier=1",
     "update-wiki:cross": "node src/synthesize.js --tier=2",
     "update-projects": "node src/synthesize-projects.js",
-    "linkedin:refresh": "node src/sources/linkedin/refresh.js"
+    "linkedin:refresh": "node src/sources/linkedin/refresh.js",
+    "sync-docs": "node src/init-kb.js --refresh-docs",
+    "dedupe-raw": "node scripts/dedupe-raw.mjs"
   },
   "dependencies": {
     "@mozilla/readability": "^0.6.0",
