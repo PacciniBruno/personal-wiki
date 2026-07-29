@@ -22,7 +22,7 @@
 
 import { join } from 'path'
 import { KB_DIR } from './config.js'
-import { listProjects, projectNeedsResync, extractProjectPdfs } from './projects.js'
+import { listProjects, projectNeedsResync, extractProjectPdfs, PROJECT_IGNORE } from './projects.js'
 import { loadState, saveState } from './state.js'
 import { claudePrint } from './claude-print.js'
 
@@ -53,19 +53,42 @@ function buildProjectPrompt(project, since) {
     ? themes.map(t => `${RAW_DIR}/${t}.md`).join('\n  - ')
     : `${join(KB_DIR, 'wiki')}/*.md`
 
+  const ignoreList = [...PROJECT_IGNORE].join(', ')
+
   return `You are updating a living wiki page for a project named "${project.name}".
+
+The project folder is a NESTED tree, not a flat list of files. Walk it recursively.
 
 FILES:
 - Project manifest:  ${project.readmePath}  (YAML frontmatter: themes, status, since)
+- Conventions:       ${project.dir}/AGENTS.md  (source-of-truth hierarchy, if present)
 - Existing wiki:     ${project.wikiPath}    (may not exist yet)
-- Project notes:     ${project.dir}/*.md       (excluding README.md and wiki.md)
-- PDF extracts:      ${project.dir}/*.pdf.txt
+- Canonical docs:    ${project.dir}/canon/**/*.md      (provisional — read the frontmatter)
+- Explorations:      ${project.dir}/exploration/**/*.md (live challenges to canon)
+- Primary evidence:  ${project.dir}/research/**/*.md    (interviews, transcripts)
+- Other notes:       ${project.dir}/**/*.md   (anything else, excluding README.md and wiki.md)
+- PDF extracts:      ${project.dir}/**/*.pdf.txt
 - Theme raw posts:
   - ${themeFiles}
 
+NEVER descend into these directories — they are build output and tooling debris:
+  ${ignoreList}
+
 TASK:
-1. Read ${project.readmePath}. Parse the YAML frontmatter to learn the project's themes (${themesList}), status, and start date.
-2. Glob and read every *.md in ${project.dir} except README.md and wiki.md. Read every *.pdf.txt.
+1. Read ${project.readmePath} and ${project.dir}/AGENTS.md (if it exists). Learn the project's themes (${themesList}), status, and its source-of-truth hierarchy.
+2. Recursively find and read every *.md under ${project.dir} except README.md and wiki.md, skipping the ignored directories above. Use a command like:
+     find "${project.dir}" -name '*.md' -not -path '*/node_modules/*' -not -path '*/dist*' -not -path '*/.claude/*' -not -path '*/qa/*' -not -path '*/_to_delete/*'
+   Read every *.pdf.txt you find the same way. Do not stop at the top level.
+
+   BE EFFICIENT — you have a wall-clock budget and this tree can be large:
+   - Run one find, then batch your reads. Don't re-read a file you've already read.
+   - Read canon/ and exploration/ docs IN FULL — they are short and load-bearing.
+     Their YAML frontmatter (status, confidence, challenged_by, challenges) is the
+     input to the Live Tensions section, so never skip it.
+   - research/ transcripts can be very long. Read the first ~150 lines of each for
+     the profile and headline findings, then grep for terms that matter to the
+     current tensions rather than reading every line.
+   - Skip files under drafts/ unless a tension or decision actually depends on them.
 3. For each theme listed in the manifest, run: tail -n 600 ~/knowledge/raw/{theme}.md
    Pick out only entries dated since ${since} that are clearly relevant to this project's thesis.
    Skip entries marked [REMOVED]. If themes is empty, scan all wiki/*.md instead and decide which themes are relevant on your own.
@@ -78,16 +101,34 @@ TASK:
 > Linked themes: ${themesList}
 
 ## Current Thesis
-[2-4 sentences. Evolve from prior wiki.md — don't restart from scratch.]
+[2-4 sentences. Evolve from prior wiki.md — don't restart from scratch.
+ State it as the CURRENT BEST ANSWER, not a settled one, whenever canon docs
+ carry status: provisional or a challenged_by field.]
+
+## Live Tensions
+[THE MOST IMPORTANT SECTION. Where canon and exploration disagree, or where two
+ canon docs disagree with each other. One block per open tension:
+ - **<short name>** — Canon says X (source doc, date). Challenged by Y (source doc, date).
+   Evidence: what research/ actually supports, if anything.
+   Status: unresolved | leaning <direction> | resolved <date>
+
+ Rules:
+ - Read the frontmatter. A canon doc with a challenged_by field ALWAYS produces a tension here.
+ - An exploration doc with status: open ALWAYS produces a tension here.
+ - Never flatten a tension into a single answer.
+ - Never drop a tension because canon is newer, older, or more confident.
+ - Never resolve one yourself. Report the disagreement and its evidence.
+ - If there are genuinely no open tensions, write "None open." and say why.]
 
 ## Open Questions
 [Bullets. Carry forward unresolved questions; mark answered ones as resolved (don't delete).]
 
 ## Recent Signal (since ${since})
-[Bullets pulled from raw/{theme}.md AND from project notes modified recently. Each bullet:
+[Bullets pulled from raw/{theme}.md AND from project notes modified recently,
+ INCLUDING material in canon/, exploration/, and research/ subfolders. Each bullet:
  - Source author/title — date
  - One-line takeaway and why it matters to this project
- - URL citation]
+ - URL citation, or the file path for internal docs]
 
 ## Related Themes
 [For each linked theme: 1-2 sentences on what's currently relevant in that theme to this project.]
@@ -97,9 +138,9 @@ TASK:
 
 STYLE:
 - Dense reference, not prose.
-- Cite URLs from raw/ entries' **Link:** field.
+- Cite URLs from raw/ entries' **Link:** field; cite internal docs by path and date.
 - Only synthesize what's actually in the files — do not invent.
-- Keep under 200 lines.`
+- Keep under 220 lines.`
 }
 
 export async function runProjectSynthesis({ only, since } = {}) {
@@ -140,10 +181,14 @@ export async function runProjectSynthesis({ only, since } = {}) {
   const results = await runWithLimit(targets, MAX_CONCURRENCY, async p => {
     const prompt = buildProjectPrompt(p, sinceDate)
     try {
-      // Projects pull in their linked themes' full raw/ files, so they're the
-      // heaviest synthesis inputs — give them a higher budget cap than the
-      // per-category default.
-      await claudePrint(prompt, 300_000, { maxBudgetUsd: process.env.SYNTH_PROJECT_MAX_USD ?? '6.00' })
+      // Projects pull in their linked themes' full raw/ files AND now walk the
+      // whole project tree (canon/, exploration/, research/ — research can hold
+      // dozens of long interview transcripts), so they're by far the heaviest
+      // synthesis inputs. Both the budget and the timeout are raised well above
+      // the per-category defaults; 5 minutes reliably SIGTERMs on a real project.
+      await claudePrint(prompt, Number(process.env.SYNTH_PROJECT_TIMEOUT_MS ?? 900_000), {
+        maxBudgetUsd: process.env.SYNTH_PROJECT_MAX_USD ?? '6.00',
+      })
       state.projects[p.name] = { lastSyncedAt: new Date().toISOString() }
       process.stdout.write(`   ✅ ${p.name}\n`)
     } catch (err) {

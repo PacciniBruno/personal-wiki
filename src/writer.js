@@ -5,12 +5,39 @@
  * updates index.md post counts, and appends to log.md.
  */
 
-import { appendFile, readFile, writeFile } from 'fs/promises'
+import { appendFile, readFile, writeFile, mkdir } from 'fs/promises'
 import { join } from 'path'
 import { KB_DIR, RAW_DIR, WIKI_DIR, FACTS_DIR, CATEGORIES, categoryToSlug, initKB } from './init-kb.js'
+import { STATE_DIR } from './config.js'
 
 const INDEX_FILE = join(KB_DIR, 'index.md')
 const LOG_FILE   = join(KB_DIR, 'log.md')
+
+/**
+ * Global URL index, independent of per-source knownKeys.
+ *
+ * Source-level dedup keys on externalId, so the same article arriving via
+ * LinkedIn and via a web clip carries two different keys and passes both
+ * checks. That put ~700 redundant entries into raw/, which inflates how heavily
+ * synthesis weights a source. This is the cross-source backstop.
+ */
+const SEEN_URLS_FILE = join(STATE_DIR, 'seen-urls.json')
+
+/** Minimum body length for an entry to be worth storing. */
+const MIN_BODY_CHARS = 40
+
+async function loadSeenUrls() {
+  try {
+    return new Set(JSON.parse(await readFile(SEEN_URLS_FILE, 'utf8')))
+  } catch {
+    return new Set()
+  }
+}
+
+async function saveSeenUrls(seen) {
+  await mkdir(STATE_DIR, { recursive: true })
+  await writeFile(SEEN_URLS_FILE, JSON.stringify([...seen], null, 0), 'utf8')
+}
 
 // ─── Format a post as a markdown entry ───────────────────────────────────────
 
@@ -56,6 +83,35 @@ function formatFacts(post) {
 
 // ─── Update index.md post counts ─────────────────────────────────────────────
 
+/**
+ * Counts real entries in a raw topic file.
+ *
+ * An entry is a `## ` heading whose next non-empty line is `**Link:**`. Scraped
+ * articles embed their own `##` subheadings in the body, so counting bare `## `
+ * lines overcounts badly (625 vs 559 on ai-technology before dedup).
+ */
+async function countEntries(slug) {
+  const text = await readFile(join(RAW_DIR, `${slug}.md`), 'utf8').catch(() => null)
+  if (text === null) return 0
+
+  const lines = text.split('\n')
+  let n = 0
+  for (let i = 0; i < lines.length; i++) {
+    if (!lines[i].startsWith('## ')) continue
+    let j = i + 1
+    while (j < lines.length && lines[j].trim() === '') j++
+    if (j < lines.length && lines[j].startsWith('**Link:**')) n++
+  }
+  return n
+}
+
+/**
+ * Rewrites index.md counts by recounting raw/ from disk.
+ *
+ * Previously this incremented the stored numbers, so any correction made outside
+ * the pipeline (a manual delete, the dedupe backfill) left index.md permanently
+ * wrong — it drifted 700 high after dedupe. Recounting is self-correcting.
+ */
 async function updateIndex(countsBySlug) {
   let content
   try {
@@ -66,32 +122,28 @@ async function updateIndex(countsBySlug) {
 
   const today = new Date().toISOString().slice(0, 10)
 
-  // Update "Last updated" header
   content = content.replace(/^> Last updated: .*/m, `> Last updated: ${today}`)
 
-  // Update total posts count
-  const totalMatch = content.match(/^> Total posts: (\d+)/m)
-  if (totalMatch) {
-    const currentTotal = parseInt(totalMatch[1], 10)
-    const added = Object.values(countsBySlug).reduce((a, b) => a + b, 0)
-    content = content.replace(/^> Total posts: \d+/m, `> Total posts: ${currentTotal + added}`)
-  }
-
-  // Update per-topic counts
-  for (const [slug, added] of Object.entries(countsBySlug)) {
-    const cat = CATEGORIES.find(c => c.slug === slug)
-    if (!cat) continue
+  let total = 0
+  for (const cat of CATEGORIES) {
+    const n = await countEntries(cat.slug)
+    total += n
 
     content = content.replace(
-      new RegExp(`(\\*\\*Raw posts:\\*\\* \\[raw/${slug}\\.md\\]\\(raw/${slug}\\.md\\) — )(\\d+) posts`),
-      (_, prefix, n) => `${prefix}${parseInt(n, 10) + added} posts`
+      new RegExp(`(\\*\\*Raw posts:\\*\\* \\[raw/${cat.slug}\\.md\\]\\(raw/${cat.slug}\\.md\\) — )\\d+ posts`),
+      `$1${n} posts`
     )
 
-    content = content.replace(
-      new RegExp(`(### \\[${cat.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\][^\\n]*\\n[^\\n]*\\n[^\\n]*\\n- Last updated: ).+`),
-      `$1${today}`
-    )
+    // Only topics that received new posts get their date bumped.
+    if (countsBySlug[cat.slug]) {
+      content = content.replace(
+        new RegExp(`(### \\[${cat.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\][^\\n]*\\n[^\\n]*\\n[^\\n]*\\n- Last updated: ).+`),
+        `$1${today}`
+      )
+    }
   }
+
+  content = content.replace(/^> Total posts: \d+/m, `> Total posts: ${total}`)
 
   await writeFile(INDEX_FILE, content, 'utf8')
 }
@@ -107,13 +159,31 @@ export async function writePosts(posts) {
 
   const countsBySlug = {}
   const updatedSlugs = new Set()
+  const seenUrls = await loadSeenUrls()
+  const skipped = { duplicate: 0, empty: 0 }
 
   for (const post of posts) {
     const slug = categoryToSlug(post.category ?? 'Other')
     const rawFile = join(RAW_DIR, `${slug}.md`)
 
+    // Cross-source duplicate: already in raw/ under some category.
+    if (post.url && seenUrls.has(post.url)) {
+      skipped.duplicate++
+      continue
+    }
+
+    // Content-free item (e.g. a large PDF the extractor couldn't read, or a
+    // link-only post). Storing it adds no signal but does advance the topic's
+    // "Last updated" stamp, which makes a stale topic look fresh.
+    const body = (post.text ?? '').trim()
+    if (body.length < MIN_BODY_CHARS && !post.summary?.trim()) {
+      skipped.empty++
+      continue
+    }
+
     const entry = formatEntry(post)
     await appendFile(rawFile, entry, 'utf8')
+    if (post.url) seenUrls.add(post.url)
 
     // Extracted facts → facts/{slug}.md
     const facts = formatFacts(post)
@@ -130,7 +200,15 @@ export async function writePosts(posts) {
     updatedSlugs.add(slug)
   }
 
+  await saveSeenUrls(seenUrls)
   await updateIndex(countsBySlug)
+
+  if (skipped.duplicate || skipped.empty) {
+    const parts = []
+    if (skipped.duplicate) parts.push(`${skipped.duplicate} duplicate`)
+    if (skipped.empty)     parts.push(`${skipped.empty} content-free`)
+    console.log(`   ↳ skipped ${parts.join(', ')}`)
+  }
 
   return [...updatedSlugs]
 }

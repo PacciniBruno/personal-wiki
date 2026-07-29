@@ -51,6 +51,29 @@ function detectClaudeBin() {
 
 export const CLAUDE_BIN = detectClaudeBin()
 
+// ─── xurl CLI (X API auth + MCP server) ──────────────────────────────────────
+
+/**
+ * Absolute path to the `xurl` binary, resolved eagerly.
+ *
+ * The X bookmarks source runs xurl as an MCP server. It used to be launched as
+ * `npx -y @xdevplatform/xurl`, which needs a network fetch when the package
+ * isn't installed — that silently failed under launchd (minimal PATH, no npm
+ * cache warm) and produced 14 days of "MCP unavailable or returned nothing".
+ * Resolving the real path here, and installing xurl globally, removes both the
+ * download and the PATH dependency.
+ */
+function detectXurlBin() {
+  if (process.env.XURL_BIN) return process.env.XURL_BIN
+  try {
+    return execSync('which xurl', { encoding: 'utf8' }).trim()
+  } catch {
+    return 'xurl' // caller surfaces a clear error
+  }
+}
+
+export const XURL_BIN = detectXurlBin()
+
 // ─── Sources ──────────────────────────────────────────────────────────────────
 
 /**
@@ -86,7 +109,7 @@ export const USER_CONTEXT = process.env.USER_CONTEXT ?? 'a professional saving c
 
 /** Full config as a plain object — passed to source.isEnabled(config). */
 export const config = {
-  KB_DIR, STATE_DIR, CLAUDE_BIN,
+  KB_DIR, STATE_DIR, CLAUDE_BIN, XURL_BIN,
   WEB_CLIP_DIR,
   APPLE_NOTES_FOLDER,
   TWITTER_MAX_AGE_DAYS,

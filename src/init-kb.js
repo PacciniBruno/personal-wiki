@@ -7,7 +7,7 @@
  * Usage: npm run init-kb
  */
 
-import { mkdir, writeFile, access } from 'fs/promises'
+import { mkdir, writeFile, readFile, access } from 'fs/promises'
 import { join } from 'path'
 import { homedir } from 'os'
 import { KB_DIR } from './config.js'
@@ -52,17 +52,37 @@ async function writeIfMissing(path, content) {
 
 const CLAUDE_MD = `# Personal Knowledge Base
 
-This folder is a curated, LLM-maintained knowledge base fed by LinkedIn saved posts
-and other sources. It uses the two-layer wiki pattern:
+This folder is a curated, LLM-maintained knowledge base fed by LinkedIn saved posts,
+X bookmarks, web clips, and Apple Notes. It uses the two-layer wiki pattern.
+
+> This file is generated from \`src/init-kb.js\`. Re-run \`npm run sync-docs\` after
+> changing the template. Hand edits are overwritten (a \`.bak\` is kept).
+
+## Synthesized layers
 
 - \`raw/\`   — source material, one file per topic, append-only
 - \`wiki/\`  — LLM-synthesized knowledge pages, updated daily after each sync
 - \`facts/\` — atomic, verifiable facts extracted from posts, one file per topic
-- \`synthesis.md\` — cross-domain patterns and helicopter view, updated weekly
+- \`synthesis.md\` — cross-domain patterns and helicopter view, updated daily
+- \`synthesis-history.md\` — dated append log of past synthesis passes
 - \`projects/\` — per-project living docs (one folder per project; see \`projects/CLAUDE.md\`)
-- \`inbox/\` — auto-ingested web clips; processed items move to \`inbox/processed/\`
-- \`articles to read/\` — read-later shelf, not auto-ingested
-- \`inspiration/\` — reference shelf, not auto-ingested
+
+## Ingestion staging (don't read these directly)
+
+- \`inbox/\` — web-clip drop folder. Ingested automatically; processed items move to \`inbox/processed/\`
+- \`chrome-clipped/\` — legacy clip folder, still scanned. Same processed/ convention
+
+## Shelves (kept by hand, never ingested or synthesized)
+
+- \`articles to read/\` — read-later shelf
+- \`inspiration/\` — reference shelf
+
+## Other outputs
+
+- \`briefings/\` — dated briefings written by agents. Write-target, not a search surface
+- \`editorial/\` — content-radar state and voice guides, backing the \`content-radar\` and \`bruno-writing\` skills
+- \`log.md\` — append-only ingest log. Prefixes: \`[INGEST]\`, \`[REMOVED]\`, \`[RECATEGORIZED]\`
+- \`index.md\` — generated topic index with per-topic counts and dates
 
 ## How to search
 
@@ -72,8 +92,14 @@ For a specific topic, read the wiki page first:
 For specific posts or quotes with source links:
   grep -ri "keyword" ~/knowledge/raw/
 
+For specific verifiable facts:
+  ~/knowledge/facts/{topic}.md
+
 For cross-domain patterns and big-picture themes:
   ~/knowledge/synthesis.md
+
+For a project, start at \`projects/{name}/AGENTS.md\`, then \`wiki.md\`'s
+\`## Live Tensions\`. Project canon is provisional — see \`projects/CLAUDE.md\`.
 
 ## Topic files
 
@@ -89,8 +115,9 @@ note the post date — weight recent content more heavily.
 
 ## Manual editing
 
-All files are plain markdown — edit freely. The sync pipeline appends to raw/ and
-regenerates wiki/ pages without touching entries marked \`[REMOVED]\`.
+All files are plain markdown — edit freely, except this one and \`index.md\`, which
+are generated. The sync pipeline appends to raw/ and regenerates wiki/ pages
+without touching entries marked \`[REMOVED]\`.
 `
 
 const INDEX_MD = `# Knowledge Base Index
@@ -130,20 +157,58 @@ that pulls signal from the themed \`raw/\` files plus its own free-form notes.
 
 \`\`\`
 projects/{name}/
-  README.md   ← read this first. YAML frontmatter (themes, status, since) +
-                a human-readable description of the project's thesis.
-  wiki.md     ← the synthesized living doc. Rewritten daily by
-                src/synthesize-projects.js — current state at a glance.
-  *.md        ← free-form notes, meeting transcripts. You write these.
-  *.pdf       ← decks, attachments. You drop these.
-  *.pdf.txt   ← auto-generated text extracts of *.pdf. Don't edit by hand.
+  README.md      ← manifest. YAML frontmatter (themes, status, since) + reading order.
+  AGENTS.md      ← conventions and the project's source-of-truth hierarchy.
+  wiki.md        ← the synthesized living doc. Rewritten by
+                   src/synthesize-projects.js. Pipeline-owned; don't hand-edit.
+  canon/         ← current canonical docs. Provisional by default (see below).
+  exploration/   ← open threads that challenge canon.
+  research/      ← primary evidence: interviews, transcripts, meeting notes.
+  drafts/        ← WIP and AI-generated material. Not authoritative.
+  *.md           ← free-form notes.
+  *.pdf          ← decks, attachments.
+  *.pdf.txt      ← auto-generated text extracts of *.pdf. Don't edit by hand.
 \`\`\`
+
+Subfolders are walked recursively. Build output and tooling debris
+(\`node_modules\`, \`dist*\`, \`.claude\`, \`qa\`, \`_to_delete\`, …) are skipped — see
+\`PROJECT_IGNORE\` in \`src/projects.js\`. A prototype app can live inside a project
+folder without polluting synthesis.
+
+## Canon is provisional
+
+These are pre-PMF projects. The idea keeps iterating, so \`canon/\` records the
+current best answer rather than a settled one, and \`exploration/\` stays live
+alongside it instead of being merged away.
+
+Canon docs carry epistemic frontmatter:
+
+\`\`\`yaml
+status: canonical | provisional | superseded | exploring
+confidence: high | medium | low
+last_reviewed: YYYY-MM-DD
+challenged_by: [exploration/...]
+\`\`\`
+
+Exploration docs carry the mirror image:
+
+\`\`\`yaml
+status: open | folded-into-canon | dropped
+challenges: [canon/...]
+evidence: [research/...]
+\`\`\`
+
+**Read both.** An answer that states canon as settled, without surfacing what
+currently challenges it, is wrong. Don't resolve a tension on Bruno's behalf.
 
 ## How to navigate this folder
 
-For a project's current state, read \`wiki.md\`.
-For the project's framing and intent, read \`README.md\`.
-For raw materials, read the \`*.md\` files (or \`grep\` across them).
+1. \`AGENTS.md\` for conventions and hierarchy.
+2. \`wiki.md\`, starting at \`## Live Tensions\` — the fastest read on what's contested.
+3. \`canon/\`, checking each doc's \`status\` and \`challenged_by\`.
+4. \`exploration/\` for the live challenges.
+5. \`research/\` when a claim needs primary backing.
+
 PDFs aren't readable directly — check the sibling \`*.pdf.txt\` instead.
 
 ## Citing
@@ -166,7 +231,8 @@ since: YYYY-MM-DD
 \`\`\`
 
 The next \`npm run update-projects\` (or daily sync) will create \`wiki.md\` and
-keep it fresh.
+keep it fresh. Per-project weekly briefings are produced externally via
+\`prompts/project-weekly-briefing.md\`.
 `
 
 function rawHeader(category) {
@@ -236,9 +302,42 @@ export async function initKB() {
   console.log('\n✅ Knowledge base ready at ~/knowledge/')
 }
 
+/**
+ * Force-rewrites the generated docs from their templates.
+ *
+ * initKB() uses writeIfMissing, which means a KB created months ago keeps its
+ * first-run CLAUDE.md forever — template improvements never reach an existing
+ * knowledge base. This is the escape hatch. Only touches files that are purely
+ * generated; index.md is left alone because writer.js maintains live counts in it.
+ */
+export async function refreshDocs() {
+  const targets = [
+    { path: join(KB_DIR, 'CLAUDE.md'),       content: CLAUDE_MD          },
+    { path: join(PROJECTS_DIR, 'CLAUDE.md'), content: PROJECTS_CLAUDE_MD },
+  ]
+
+  for (const { path, content } of targets) {
+    const current = await readFile(path, 'utf8').catch(() => null)
+    if (current === content) {
+      console.log(`  Unchanged: ${path.replace(homedir(), '~')}`)
+      continue
+    }
+    if (current !== null) {
+      const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14)
+      await writeFile(`${path}.bak.${stamp}`, current, 'utf8')
+    }
+    await writeFile(path, content, 'utf8')
+    console.log(`  Rewrote:   ${path.replace(homedir(), '~')}`)
+  }
+}
+
 // Run directly
 if (process.argv[1]?.endsWith('init-kb.js')) {
-  initKB().catch(err => {
+  const run = process.argv.includes('--refresh-docs')
+    ? refreshDocs().then(() => console.log('\n✅ Generated docs refreshed.'))
+    : initKB()
+
+  run.catch(err => {
     console.error('❌', err.message)
     process.exit(1)
   })

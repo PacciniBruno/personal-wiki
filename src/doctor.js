@@ -2,9 +2,10 @@
  * doctor.js — Health check for the personal-wiki pipeline.
  *
  * Answers "why is sync dead?" without guessing. Inspects the things that
- * actually break in production — node/claude resolution, API key, KB freshness,
- * per-source dedup state, the daily run stamps, the LinkedIn cached session,
- * and the failure logs — and prints a verdict with the most likely culprit.
+ * actually break in production — node/claude resolution, claude login state,
+ * KB freshness, per-source dedup state, the daily run stamps, the LinkedIn
+ * cached session, and the failure logs — and prints a verdict with the most
+ * likely culprit.
  *
  * Usage: npm run doctor
  */
@@ -12,7 +13,7 @@
 import { readFile, readdir, stat } from 'fs/promises'
 import { join } from 'path'
 import { homedir } from 'os'
-import { execFileSync } from 'child_process'
+import { execFileSync, spawn } from 'child_process'
 import { KB_DIR, STATE_DIR, CLAUDE_BIN } from './config.js'
 
 const TODAY = new Date().toISOString().slice(0, 10)
@@ -67,15 +68,60 @@ async function checkEnvironment() {
     findings.push('claude CLI is not runnable — all synthesis/project updates will fail.')
   }
 
-  if (process.env.ANTHROPIC_API_KEY) {
-    console.log(ok('ANTHROPIC_API_KEY is set (used by the Haiku categorizer).'))
+  // Categorization AND synthesis both run through `claude -p` on the
+  // subscription; claude-print.js deliberately strips ANTHROPIC_API_KEY from the
+  // child env. The key is therefore irrelevant here, and the real failure mode
+  // is a logged-out CLI — that's what actually broke on 2026-07-22/23.
+  const loggedIn = await claudeLoggedIn()
+  if (loggedIn === true) {
+    console.log(ok('claude CLI is logged in — categorization and synthesis can run.'))
+  } else if (loggedIn === false) {
+    console.log(bad('claude CLI is NOT logged in — run `claude /login`.'))
+    findings.push('claude CLI is not logged in — categorization and all synthesis will fail.')
   } else {
-    console.log(bad('ANTHROPIC_API_KEY is missing — ingest categorization will fail.'))
-    findings.push('ANTHROPIC_API_KEY is missing — ingest cannot categorize posts.')
+    console.log(warn('could not determine claude login state (probe failed or timed out).'))
   }
-  console.log('   note: synthesis strips ANTHROPIC_API_KEY and uses your claude')
-  console.log('         subscription. If `claude` is not logged in (claude /login),')
-  console.log('         wiki/project synthesis fails even when ingest works.')
+
+  if (process.env.ANTHROPIC_API_KEY) {
+    console.log('   note: ANTHROPIC_API_KEY is set but unused — the pipeline strips it')
+    console.log('         and bills your claude subscription instead.')
+  }
+}
+
+/**
+ * Probes whether the claude CLI has a usable session, the same way the pipeline
+ * invokes it (API key stripped). Returns true/false, or null if the probe itself
+ * could not run.
+ */
+async function claudeLoggedIn() {
+  const env = { ...process.env }
+  delete env.ANTHROPIC_API_KEY
+  delete env.ANTHROPIC_AUTH_TOKEN
+
+  return new Promise(resolve => {
+    let settled = false
+    const done = v => { if (!settled) { settled = true; resolve(v) } }
+
+    let child
+    try {
+      child = spawn(CLAUDE_BIN, ['--print', '--model', 'haiku', 'reply with OK'], {
+        env, stdio: ['ignore', 'pipe', 'pipe'],
+      })
+    } catch {
+      return done(null)
+    }
+
+    let out = ''
+    child.stdout.on('data', d => { out += d })
+    child.stderr.on('data', d => { out += d })
+    child.on('error', () => done(null))
+    child.on('close', code => {
+      if (/not logged in|please run \/login/i.test(out)) return done(false)
+      done(code === 0 ? true : null)
+    })
+
+    setTimeout(() => { try { child.kill() } catch {} ; done(null) }, 45_000)
+  })
 }
 
 // ── Knowledge base freshness ───────────────────────────────────────────────
@@ -112,8 +158,19 @@ async function checkKnowledgeBase() {
     }
   }
 
-  const wiki = await fileAge(join(KB_DIR, 'wiki'))
-  if (wiki.exists) console.log(`   wiki/ last touched ${wiki.days.toFixed(1)}d ago`)
+  // Use the newest file inside wiki/, not the directory mtime — a directory's
+  // mtime only moves when entries are added or removed, so it reports a
+  // continuously-regenerated wiki/ as months stale.
+  const wikiDir = join(KB_DIR, 'wiki')
+  const wikiFiles = await readdir(wikiDir).catch(() => [])
+  let newestWiki = null
+  for (const f of wikiFiles.filter(f => f.endsWith('.md'))) {
+    const age = await fileAge(join(wikiDir, f))
+    if (age.exists && (!newestWiki || age.mtime > newestWiki.mtime)) newestWiki = { ...age, name: f }
+  }
+  if (newestWiki) {
+    console.log(`   most recent wiki/ write: ${newestWiki.name} (${newestWiki.days.toFixed(1)}d ago)`)
+  }
   const synth = await fileAge(join(KB_DIR, 'synthesis.md'))
   if (synth.exists) console.log(`   synthesis.md updated ${synth.days.toFixed(1)}d ago`)
 

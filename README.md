@@ -2,7 +2,7 @@
 
 > **macOS only.**
 
-Turns your saved LinkedIn posts into a searchable, AI-synthesized knowledge base that lives in `~/knowledge/` and works inside Claude Code. Every day it pulls your new saves, categorizes them with Claude Haiku, and updates living wiki pages by topic. Once a week it writes a cross-domain synthesis across everything you've collected.
+Turns your saved LinkedIn posts into a searchable, AI-synthesized knowledge base that lives in `~/knowledge/` and works inside Claude Code. Every day it pulls your new saves, categorizes them with Claude Haiku, and updates living wiki pages by topic. Once a day it also rewrites a cross-domain synthesis across everything you've collected.
 
 The minimal setup is LinkedIn. Twitter, Apple Notes, and web clips are optional add-ons.
 
@@ -12,7 +12,7 @@ The minimal setup is LinkedIn. Twitter, Apple Notes, and web clips are optional 
 ~/knowledge/
   raw/          one markdown file per topic, every post appended
   wiki/         synthesized pages, rewritten daily by Claude
-  synthesis.md  cross-domain patterns, rewritten weekly
+  synthesis.md  cross-domain patterns, rewritten daily
   index.md      topic overview
 ```
 
@@ -50,7 +50,7 @@ npm install
 cp .env.example .env       # add your ANTHROPIC_API_KEY
 npm run init-kb            # create ~/knowledge/ structure
 npm run bootstrap          # first import — Chrome opens, log in to LinkedIn
-npm run setup              # install daily/weekly automation (macOS)
+npm run setup              # install daily automation (macOS)
 ```
 
 ## First run
@@ -87,7 +87,7 @@ See `.env.example` for all options.
 ## Optional sources
 
 ### Twitter/X
-Twitter/X is an optional source and is not part of the default `npm run sync` path. Chromium auth is unreliable here, especially around email-first and Google OAuth flows, so only use it explicitly when you want to attempt a bookmarks sync.
+Twitter/X is part of the default `npm run sync` path. It fetches bookmarks through the official X API via the `xapi` MCP server (`npx @xdevplatform/xurl`), not by scraping — authenticate once with `xurl`. Set `TWITTER_ENABLED=false` in `.env` to skip it.
 
 ### Apple Notes
 Set `APPLE_NOTES_FOLDER` in `.env`. On iPhone: **Share → Notes** → save to that folder. The sync extracts URLs from each note, fetches the article, and moves the note to `"[folder] Processed"` when done.
@@ -109,7 +109,7 @@ npm run setup
 
 Installs two launchd agents that run on every wake from sleep:
 - **Daily** — sync new posts + update wiki pages for changed topics
-- **Weekly** — rewrite `synthesis.md` with cross-domain patterns
+- **Daily** — rewrite `synthesis.md` with cross-domain patterns
 
 Logs: `~/Library/Logs/personal-wiki-sync.log` and `personal-wiki-synthesis.log`.
 
@@ -148,8 +148,7 @@ DEBUG=1 npm run sync      # verbose output + saves raw API responses
 
 ## Limitations
 
-- **Scraping can break.** LinkedIn and Twitter change their internal APIs without notice. If the scraper stops working, check `debug-*.json` (run with `DEBUG=1`) and update `src/sources/linkedin/parser.js` or `src/sources/twitter/parser.js`.
-- **Twitter login requires email + password** — Google OAuth is blocked in Puppeteer's Chromium.
+- **Scraping can break.** LinkedIn changes its internal Voyager API without notice. If the scraper stops working, run with `DEBUG=1` and update `src/sources/linkedin/parser.js`. Twitter/X uses the official API and fails on auth rather than on parsing.
 - **Apple Notes and web clips are macOS-only** by nature.
 - **Wiki synthesis requires Claude Code CLI** — the raw sync pipeline works without it.
 
