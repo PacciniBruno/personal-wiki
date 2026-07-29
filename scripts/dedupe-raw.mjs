@@ -19,7 +19,7 @@
  *
  * Usage:
  *   node scripts/dedupe-raw.mjs            # dry run, prints a report
- *   node scripts/dedupe-raw.mjs --apply    # writes .bak files, then rewrites
+ *   node scripts/dedupe-raw.mjs --apply    # backs up to STATE_DIR, then rewrites
  */
 
 import { readdir, readFile, writeFile, copyFile, mkdir } from 'fs/promises'
@@ -29,6 +29,11 @@ import { KB_DIR, STATE_DIR } from '../src/config.js'
 const APPLY   = process.argv.includes('--apply')
 const RAW_DIR = join(KB_DIR, 'raw')
 const FACTS_DIR = join(KB_DIR, 'facts')
+
+// Backups go to STATE_DIR, never beside the originals. CLAUDE.md tells readers
+// to search with `grep -ri ~/knowledge/raw/`, so a .bak sitting in raw/ silently
+// doubles every search result.
+const BACKUP_DIR = join(STATE_DIR, 'backups')
 
 const LINK_RE = /^\*\*Link:\*\*\s*(\S+)/
 
@@ -100,7 +105,8 @@ async function dedupeRaw() {
     perFile.push({ file, before: entries.length, after: kept.length, dropped })
 
     if (APPLY && dropped.length > 0) {
-      await copyFile(path, `${path}.predupe.bak`)
+      await mkdir(BACKUP_DIR, { recursive: true })
+      await copyFile(path, join(BACKUP_DIR, `raw-${file}.predupe.bak`))
       const rebuilt = preamble + kept.map(e => e.text).join('\n')
       await writeFile(path, rebuilt, 'utf8')
     }
@@ -135,7 +141,8 @@ async function dedupeFacts() {
     results.push({ file, dropped })
 
     if (APPLY && dropped > 0) {
-      await copyFile(path, `${path}.predupe.bak`)
+      await mkdir(BACKUP_DIR, { recursive: true })
+      await copyFile(path, join(BACKUP_DIR, `facts-${file}.predupe.bak`))
       await writeFile(path, kept.join('\n'), 'utf8')
     }
   }
@@ -175,4 +182,4 @@ if (APPLY) {
   console.log(`\nSeeded ${raw.urlToFiles.size} URLs into ${seedFile}`)
 }
 
-if (!APPLY) console.log('\nNothing written. Re-run with --apply to rewrite (originals saved as *.predupe.bak).')
+if (!APPLY) console.log(`\nNothing written. Re-run with --apply to rewrite (originals backed up to ${BACKUP_DIR}).`)

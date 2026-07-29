@@ -10,7 +10,7 @@
 import { mkdir, writeFile, readFile, access } from 'fs/promises'
 import { join } from 'path'
 import { homedir } from 'os'
-import { KB_DIR } from './config.js'
+import { KB_DIR, STATE_DIR } from './config.js'
 
 export { KB_DIR }
 export const RAW_DIR       = join(KB_DIR, 'raw')
@@ -323,8 +323,13 @@ export async function refreshDocs() {
       continue
     }
     if (current !== null) {
+      // Backups live in STATE_DIR, never inside the KB — a .bak beside the
+      // original pollutes the documented `grep -ri ~/knowledge/...` search path.
       const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14)
-      await writeFile(`${path}.bak.${stamp}`, current, 'utf8')
+      const backupDir = join(STATE_DIR, 'backups')
+      await mkdir(backupDir, { recursive: true })
+      const label = path.replace(`${KB_DIR}/`, '').replace(/\//g, '-')
+      await writeFile(join(backupDir, `${label}.bak.${stamp}`), current, 'utf8')
     }
     await writeFile(path, content, 'utf8')
     console.log(`  Rewrote:   ${path.replace(homedir(), '~')}`)
