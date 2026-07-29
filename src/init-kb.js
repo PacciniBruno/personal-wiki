@@ -69,12 +69,12 @@ X bookmarks, web clips, and Apple Notes. It uses the two-layer wiki pattern.
 
 ## Ingestion staging (don't read these directly)
 
-- \`inbox/\` — web-clip drop folder. Ingested automatically; processed items move to \`inbox/processed/\`
-- \`chrome-clipped/\` — legacy clip folder, still scanned. Same processed/ convention
+- \`chrome-clipped/\` — the web-clip drop folder (set by \`WEB_CLIP_DIR\`). Obsidian
+  Web Clipper writes here; the sync ingests each clip and moves it to
+  \`chrome-clipped/processed/\`. A clip sitting at the top level is pending, not lost.
 
 ## Shelves (kept by hand, never ingested or synthesized)
 
-- \`articles to read/\` — read-later shelf
 - \`inspiration/\` — reference shelf
 
 ## Other outputs
@@ -280,8 +280,9 @@ export async function initKB() {
   await mkdir(FACTS_DIR,     { recursive: true })
   await mkdir(PROJECTS_DIR,  { recursive: true })
   await mkdir(BRIEFINGS_DIR, { recursive: true })
-  await mkdir(join(KB_DIR, 'inbox'), { recursive: true })
-  await mkdir(join(KB_DIR, 'articles to read'), { recursive: true })
+  // The web-clip drop folder is whatever WEB_CLIP_DIR points at (default
+  // KB_DIR/inbox). Not created here: recreating it on every ingest resurrected
+  // an empty second inbox alongside the one the clipper actually writes to.
   await mkdir(join(KB_DIR, 'inspiration'), { recursive: true })
 
   // Root files
