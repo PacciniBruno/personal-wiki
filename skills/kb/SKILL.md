@@ -16,8 +16,8 @@ material on the topic.
 - `synthesis.md` — cross-domain patterns, helicopter view.
 - `projects/{name}/` — per-project living docs. Currently: `projects/dona/`.
 - `briefings/` — dated briefings. Write-target, not a search surface.
-- `inbox/`, `chrome-clipped/` — web-clip staging. Ingested automatically; don't read directly.
-- `articles to read/`, `inspiration/` — shelves Bruno keeps by hand. Not ingested, not synthesized.
+- `chrome-clipped/` — web-clip staging. Ingested automatically into `raw/`; don't read directly.
+- `inspiration/` — a shelf Bruno keeps by hand. Not ingested, not synthesized.
 
 Topics: `ai-technology` · `career-work` · `investing-finance` · `leadership-management` · `marketing-growth` · `mindset-personal-dev` · `other` · `product-ux` · `sales-business-dev` · `startup-entrepreneurship`
 
